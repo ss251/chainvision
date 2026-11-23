@@ -37,6 +37,14 @@ interface HlClearinghouseResponse {
   assetPositions?: HlClearinghousePosition[];
 }
 
+interface HlSpotClearinghouseResponse {
+  balances?: Array<{
+    coin: string;
+    total: string;
+    hold: string;
+  }>;
+}
+
 function formatHlPrice(px: number): string {
   // Hyperliquid tick formatting: <= 5 significant figures, max 6 decimals for perps
   const sig = Number(px.toPrecision(5));
@@ -125,11 +133,22 @@ export class HyperliquidTestnetClient {
       const positions: HyperliquidPosition[] = [];
 
       if (accountAddress !== '0x0000000000000000000000000000000000000000') {
-        const ch = await this.postInfo<HlClearinghouseResponse>({
-          type: 'clearinghouseState',
-          user: accountAddress,
-        });
-        accountValueUsd = Number(ch.marginSummary?.accountValue ?? 0);
+        const [ch, spot] = await Promise.all([
+          this.postInfo<HlClearinghouseResponse>({
+            type: 'clearinghouseState',
+            user: accountAddress,
+          }),
+          this.postInfo<HlSpotClearinghouseResponse>({
+            type: 'spotClearinghouseState',
+            user: accountAddress,
+          }).catch(() => ({ balances: [] })),
+        ]);
+        const perpValueUsd = Number(ch.marginSummary?.accountValue ?? 0);
+        const spotUsdc = Number(
+          spot.balances?.find((b) => b.coin === 'USDC')?.total ?? 0,
+        );
+        // In Hyperliquid Unified Account mode, USDC collateral lives in spotClearinghouseState
+        accountValueUsd = perpValueUsd > 0 ? perpValueUsd : spotUsdc;
         marginUsedUsd = Number(ch.marginSummary?.totalMarginUsed ?? 0);
 
         for (const ap of ch.assetPositions ?? []) {
@@ -310,6 +329,67 @@ export class HyperliquidTestnetClient {
       orderId: String(oid),
       status,
       raw,
+    };
+  }
+
+  /**
+   * Testnet-only demo helper (used only by scripts/setup-hyperliquid-position.ts) to open a
+   * tiny capped perp position so the watcher & reduce-only trim have a live position to manage.
+   */
+  async openTestnetDemoPosition(params: {
+    coin: string;
+    notionalUsd: number;
+  }): Promise<{ orderId: string; status: string }> {
+    if (!this.config.hyperliquidApiUrl.includes('testnet')) {
+      throw new Error('Refusing non-testnet Hyperliquid URL');
+    }
+    if (params.notionalUsd > 100) {
+      throw new Error('Demo seed notional capped at $100');
+    }
+    const { items, ctxs } = await this.getMetaAndCtxs();
+    const assetIdx = items.findIndex((i) => i.name === params.coin);
+    if (assetIdx < 0) throw new Error(`Unknown coin ${params.coin}`);
+    const markPx = Number(ctxs[assetIdx]!.markPx);
+    const szDecimals = items[assetIdx]!.szDecimals;
+    const size = Number((params.notionalUsd / markPx).toFixed(szDecimals));
+    const limitPx = markPx * 1.03;
+
+    const action = {
+      type: 'order',
+      orders: [
+        {
+          a: assetIdx,
+          b: true,
+          p: formatHlPrice(limitPx),
+          s: formatHlSize(size, szDecimals),
+          r: false,
+          t: { limit: { tif: 'Ioc' } },
+        },
+      ],
+      grouping: 'na',
+    };
+    const nonce = Date.now();
+    const signature = await this.signTestnetL1Action(action, nonce);
+    const res = await fetch(`${this.config.hyperliquidApiUrl}/exchange`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action, nonce, signature, vaultAddress: null }),
+      signal: AbortSignal.timeout(12000),
+    });
+    const raw = (await res.json()) as {
+      status?: string;
+      response?: {
+        data?: { statuses?: Array<{ filled?: { oid: number; totalSz: string; avgPx: string }; error?: string }> };
+      };
+    };
+    if (!res.ok || raw.status !== 'ok') {
+      throw new Error(`Hyperliquid seed order error: ${JSON.stringify(raw)}`);
+    }
+    const st = raw.response?.data?.statuses?.[0];
+    if (st?.error) throw new Error(`Hyperliquid seed order rejected: ${st.error}`);
+    return {
+      orderId: String(st?.filled?.oid ?? nonce),
+      status: st?.filled ? `FILLED ${st.filled.totalSz} @ $${st.filled.avgPx}` : 'ACCEPTED',
     };
   }
 
