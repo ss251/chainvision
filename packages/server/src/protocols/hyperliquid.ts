@@ -144,11 +144,11 @@ export class HyperliquidTestnetClient {
           }).catch(() => ({ balances: [] })),
         ]);
         const perpValueUsd = Number(ch.marginSummary?.accountValue ?? 0);
-        const spotUsdc = Number(
-          spot.balances?.find((b) => b.coin === 'USDC')?.total ?? 0,
-        );
-        // In Hyperliquid Unified Account mode, USDC collateral lives in spotClearinghouseState
-        accountValueUsd = perpValueUsd > 0 ? perpValueUsd : spotUsdc;
+        const usdcBal = spot.balances?.find((b) => b.coin === 'USDC');
+        const spotUsdc = Number(usdcBal?.total ?? 0);
+        const spotHold = Number(usdcBal?.hold ?? 0);
+        // In Hyperliquid Unified Account mode, spot USDC holds perp margin; avoid double-counting hold
+        accountValueUsd = spotUsdc > 0 ? Math.max(0, spotUsdc - spotHold) + perpValueUsd : perpValueUsd;
         marginUsedUsd = Number(ch.marginSummary?.totalMarginUsed ?? 0);
 
         for (const ap of ch.assetPositions ?? []) {
@@ -414,7 +414,12 @@ export class HyperliquidTestnetClient {
     const meta = items.find((i) => i.name === pos.coin);
     const szDecimals = meta?.szDecimals ?? 4;
     const rawTrimSz = pos.size * (Math.min(100, Math.max(1, params.amountPct)) / 100);
-    const trimSz = Number(rawTrimSz.toFixed(szDecimals));
+    let trimSz = Number(rawTrimSz.toFixed(szDecimals));
+    // Hyperliquid requires >= $10 notional per non-dust order; bump to $11 or full close
+    const minNotionalSz = Number((11 / pos.markPx).toFixed(szDecimals));
+    if (trimSz * pos.markPx < 10.5) {
+      trimSz = Math.min(pos.size, Math.max(trimSz, minNotionalSz));
+    }
     if (trimSz <= 0) {
       throw new Error(`Computed trim size for ${pos.coin} is 0`);
     }

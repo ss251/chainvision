@@ -11,13 +11,14 @@ async function main() {
   const before = await hl.readSnapshot();
   console.log('[setup:hyperliquid] Account:', before.accountAddress, 'Equity:', before.accountValueUsd);
 
-  if (before.positions.some((p) => p.coin === 'ETH')) {
-    console.log('[setup:hyperliquid] Existing ETH position found:', before.positions[0]);
+  const existing = before.positions.find((p) => p.coin === 'ETH');
+  if (existing && existing.notionalUsd >= 45) {
+    console.log('[setup:hyperliquid] Existing ETH position found:', existing);
     return;
   }
 
-  console.log('[setup:hyperliquid] Opening ~$40 ETH-PERP long on Hyperliquid Testnet...');
-  const res = await hl.openTestnetDemoPosition({ coin: 'ETH', notionalUsd: 40 });
+  console.log('[setup:hyperliquid] Opening ~$60 ETH-PERP long on Hyperliquid Testnet...');
+  const res = await hl.openTestnetDemoPosition({ coin: 'ETH', notionalUsd: 60 });
   console.log('[setup:hyperliquid] Result:', res);
 
   const after = await hl.readSnapshot();
