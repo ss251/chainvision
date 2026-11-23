@@ -1,0 +1,28 @@
+{
+  "name": "chainvision",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "ChainVision: one-stop non-custodial crypto HUD for Even Realities G2 smart glasses (testnet only)",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace @chainvision/server run dev",
+    "dev:glasses": "npm --workspace @chainvision/glasses run dev",
+    "dev:miniapp": "npm --workspace @chainvision/miniapp run dev",
+    "build": "npm --workspace @chainvision/shared run build && npm --workspace @chainvision/server run build && npm --workspace @chainvision/glasses run build && npm --workspace @chainvision/miniapp run build",
+    "test": "vitest run",
+    "typecheck": "npm --workspace @chainvision/shared run typecheck && npm --workspace @chainvision/server run typecheck && npm --workspace @chainvision/glasses run typecheck && npm --workspace @chainvision/miniapp run typecheck",
+    "verify:testnet": "tsx scripts/verify-testnet.ts",
+    "setup:sepolia": "tsx scripts/setup-sepolia-positions.ts",
+    "sim": "npx -y @evenrealities/evenhub-simulator@0.9.5 http://127.0.0.1:5173 --automation-port 9898"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

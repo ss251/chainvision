@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ChainVision · Telegram Mini App Setup</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+      :root {
+        --bg: #070b08;
+        --panel: #101914;
+        --border: #203828;
+        --green: #4ade80;
+        --amber: #facc15;
+        --muted: #8ea998;
+        --text: #eef8f1;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        padding: 16px;
+        max-width: 520px;
+        margin-inline: auto;
+      }
+      .notice {
+        background: #1a180a;
+        border: 1px solid #6b5c15;
+        color: #fef08a;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 12px;
+        margin-bottom: 14px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+      h1 { font-size: 20px; margin: 0 0 4px; color: var(--green); }
+      h2 { font-size: 14px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--green); }
+      label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+      input {
+        width: 100%;
+        background: #0a100c;
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 14px;
+      }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      button {
+        width: 100%;
+        margin-top: 10px;
+        background: var(--green);
+        color: #062111;
+        border: none;
+        border-radius: 8px;
+        padding: 11px 14px;
+        font-weight: 700;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #14281c;
+        color: var(--green);
+        border: 1px solid var(--green);
+      }
+      .status { font-size: 12px; color: var(--muted); margin-top: 8px; word-break: break-all; }
+      .pill {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #14281c;
+        color: var(--green);
+        font-size: 11px;
+        font-weight: 600;
+      }
+      a.deep { color: var(--green); font-size: 12px; display: inline-block; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <span class="pill">EVEN G2 · TESTNET ONLY</span>
+      <h1>ChainVision Setup</h1>
+      <div class="status">Connect Trust Wallet (Sepolia), pair your G2 glasses, and set your own alert thresholds.</div>
+    </div>
+
+    <div class="notice">
+      <strong>Testnet only · Non-custodial · Not financial advice.</strong>
+      ChainVision never holds user funds, never asks for a mainnet private key, and executes only testnet actions you confirm with a tap on the glasses.
+    </div>
+
+    <div class="card">
+      <h2>1. Wallet (Trust Wallet · Sepolia)</h2>
+      <button id="btn-wc" type="button">Connect Trust Wallet (WalletConnect / Sepolia)</button>
+      <button id="btn-injected" class="secondary" type="button">Use Browser / Trust Wallet Extension</button>
+      <label for="wallet-addr">Watched Sepolia Address (0x...)</label>
+      <input id="wallet-addr" placeholder="0x..." />
+      <div id="wallet-status" class="status">Not connected</div>
+      <div id="wc-deeplink"></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Pair Even G2 Glasses</h2>
+      <label for="pair-code">6-Digit Code from Glasses Companion</label>
+      <input id="pair-code" maxlength="6" placeholder="123456" />
+      <label for="tg-chat-id">Telegram Chat ID (auto-filled in Telegram)</label>
+      <input id="tg-chat-id" placeholder="Optional — or send /pair &lt;code&gt; to bot" />
+    </div>
+
+    <div class="card">
+      <h2>3. Thresholds &amp; Safety Caps</h2>
+      <div class="grid">
+        <div>
+          <label for="th-aave-hf">Aave Min Health Factor</label>
+          <input id="th-aave-hf" type="number" step="0.05" value="1.35" />
+        </div>
+        <div>
+          <label for="th-aave-repay">Aave Tap Repay (USDC)</label>
+          <input id="th-aave-repay" type="number" step="10" value="300" />
+        </div>
+        <div>
+          <label for="th-hl-liq">HL Min Liq Distance (%)</label>
+          <input id="th-hl-liq" type="number" step="1" value="10" />
+        </div>
+        <div>
+          <label for="th-hl-trim">HL Tap Trim (%)</label>
+          <input id="th-hl-trim" type="number" step="5" value="50" />
+        </div>
+        <div>
+          <label for="th-cap-usd">Per-Action Cap ($)</label>
+          <input id="th-cap-usd" type="number" step="50" value="1000" />
+        </div>
+        <div>
+          <label for="th-cap-eth">Max Swap Cap (ETH)</label>
+          <input id="th-cap-eth" type="number" step="0.05" value="0.25" />
+        </div>
+      </div>
+      <button id="btn-save" type="button">Pair &amp; Save Configuration</button>
+      <div id="save-status" class="status"></div>
+    </div>
+
+    <div class="card">
+      <h2>4. Live Testnet Snapshot</h2>
+      <div id="live-snap" class="status">Loading live data...</div>
+      <button id="btn-refresh" class="secondary" type="button">Refresh Live Data</button>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
