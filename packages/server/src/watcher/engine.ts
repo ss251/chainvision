@@ -365,15 +365,18 @@ export class ChainVisionEngine {
       const aaveRate =
         snap.aave.rates.find((r) => r.symbol === (intent.token === 'ETH' ? 'WETH' : intent.token))
           ?.supplyApyPct ?? 0;
-      const exFunding = snap.exchange.ethFundingPct;
+      // Compare like with like: all annualized yields on testnets
+      // Exchange perp funding settles 3x/day (every 8h); Hyperliquid settles hourly (24x/day)
+      const exAnnualApr = snap.exchange.ethFundingPct * 3 * 365;
+      const hlAnnualApr = snap.hyperliquid.ethFundingPctHr * 24 * 365;
       return {
         id: `act_${crypto.randomBytes(4).toString('hex')}`,
         source: 'voice',
         protocol: 'aave',
         actionType: 'aave_supply',
-        headline: `AAVE SUPPLY ${capped} ${intent.token} (SEPOLIA)`,
-        factLine: `AAVE APY ${aaveRate.toFixed(2)}% · UNI FEE 0.05% · EX FUND ${exFunding.toFixed(3)}%`,
-        comparisonLine: `CAP ${th.maxUsdcAction} USDC · NON-CUSTODIAL`,
+        headline: `AAVE SUPPLY ${capped} ${intent.token} (SEPOLIA TESTNET)`,
+        factLine: `AAVE ${aaveRate.toFixed(1)}% APY · HL ${hlAnnualApr.toFixed(1)}% APR · EX ${exAnnualApr.toFixed(1)}% APR`,
+        comparisonLine: `TESTNET RATES (ANNUAL) · CAP ${th.maxUsdcAction} USDC`,
         actionPrompt: `SUPPLY ${capped} ${intent.token}`,
         params: { tokenIn: intent.token, amount: capped },
         createdAt: now,
@@ -428,9 +431,9 @@ export class ChainVisionEngine {
         source: 'voice',
         protocol: 'uniswap',
         actionType: 'uniswap_swap',
-        headline: `UNISWAP ${cappedIn} ${intent.tokenIn} -> ${intent.tokenOut}`,
-        factLine: `UNI QUOTE: ${quoteOut.toFixed(4)} ${intent.tokenOut} · HL ETH $${snap.hyperliquid.ethMarkPx.toFixed(0)}`,
-        comparisonLine: `SLIPPAGE 3% MAX · SEPOLIA ROUTER02`,
+        headline: `UNISWAP ${cappedIn} ${intent.tokenIn} -> ${intent.tokenOut} (TESTNET)`,
+        factLine: `UNI TESTNET OUT: ${quoteOut.toFixed(4)} ${intent.tokenOut} (3% MAX SLIP)`,
+        comparisonLine: `HL MARK $${snap.hyperliquid.ethMarkPx.toFixed(0)} · EX MARK $${snap.exchange.ethMarkPx.toFixed(0)}`,
         actionPrompt: `SWAP ${cappedIn} ${intent.tokenIn}`,
         params: {
           tokenIn: intent.tokenIn,

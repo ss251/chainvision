@@ -149,6 +149,24 @@ describe('ChainVisionEngine watcher, pairing & receipts', () => {
     expect(wav.readUInt16LE(34)).toBe(16);
   });
 
+  it('formats voice aave_supply confirm card with apples-to-apples annualized testnet yields', async () => {
+    const engine = new ChainVisionEngine(loadConfig());
+    const snap = makeSnapshots();
+    snap.aave.rates = [{ symbol: 'USDC', address: '0x94a9', supplyApyPct: 57.59, borrowApyPct: 60 }];
+    snap.hyperliquid.ethFundingPctHr = 0.00125; // ~10.95% APR
+    snap.exchange.ethFundingPct = 0.0025; // ~2.74% APR
+
+    const action = await engine.buildActionFromIntent(
+      { action: 'aave_supply', token: 'USDC', amount: 200, compareVenues: true, confidence: 0.95 },
+      snap,
+    );
+    expect(action).not.toBeNull();
+    expect(action?.factLine).toContain('APY');
+    expect(action?.factLine).toContain('APR');
+    expect(action?.factLine).not.toContain('FEE');
+    expect(action?.comparisonLine).toContain('TESTNET');
+  });
+
   it('formats Telegram receipts with testnet & non-advice notice', () => {
     const receipt = {
       id: 'r1',

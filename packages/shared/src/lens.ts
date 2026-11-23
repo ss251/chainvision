@@ -302,7 +302,7 @@ export function renderLensPage(state: LensViewState): LensPageLayout {
       body = [
         `HEALTH: ${hf}  ${renderBar(hfRatio, 10)}`,
         `COLLAT: ${fmtUsd(s.aave.totalCollateralUsd)}  DEBT: ${fmtUsd(s.aave.totalDebtUsd)}`,
-        `USDC APY: ${usdcRate ? usdcRate.supplyApyPct.toFixed(2) : '0.00'}%  BAL: ${s.aave.usdcBalance.toFixed(1)} USDC`,
+        `TESTNET USDC APY: ${usdcRate ? usdcRate.supplyApyPct.toFixed(1) : '0.0'}%  BAL: ${s.aave.usdcBalance.toFixed(1)}`,
       ].join('\n');
     } else if (idx === 1) {
       header = 'HYPERLIQUID TESTNET · 2/4';
@@ -325,8 +325,8 @@ export function renderLensPage(state: LensViewState): LensPageLayout {
       header = 'UNISWAP V3 SEPOLIA · 3/4';
       const lp = s.uniswap.lpPositions[0];
       body = [
-        `POOL ${s.uniswap.pair} (${s.uniswap.feeTier / 10000}%)`,
-        `ETH QUOTE: ${fmtUsd(s.uniswap.ethQuoteUsdc)}  TICK: ${s.uniswap.currentTick}`,
+        `POOL ${s.uniswap.pair} (${s.uniswap.feeTier / 10000}% TESTNET)`,
+        `TESTNET QUOTE: ${fmtUsd(s.uniswap.ethQuoteUsdc)}  TICK: ${s.uniswap.currentTick}`,
         lp
           ? `LP #${lp.tokenId}: ${lp.inRange ? 'IN RANGE' : 'OUT OF RANGE'} [${lp.tickLower},${lp.tickUpper}]`
           : `LP POSITIONS: 0  USDC/DAI: ${s.uniswap.usdcToDaiRate.toFixed(3)}`,
