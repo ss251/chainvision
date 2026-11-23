@@ -106,4 +106,13 @@ describe('Safety policy engine (testnet-only, allowlisted, capped)', () => {
     expect(h1).toBe(h2);
     expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
   });
+
+  it('keeps secret fields non-enumerable in AppConfig JSON serialization', async () => {
+    const { loadConfig } = await import('../packages/server/src/config.js');
+    const serialized = JSON.stringify(loadConfig());
+    expect(serialized).not.toContain('sepoliaPrivateKey');
+    expect(serialized).not.toContain('hyperliquidAgentPrivateKey');
+    expect(serialized).not.toContain('openRouterApiKey');
+    expect(serialized).not.toContain('telegramBotToken');
+  });
 });

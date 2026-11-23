@@ -199,7 +199,7 @@ export function loadConfig(): AppConfig {
 
   const hlAccountAddress = asAddress(env.HYPERLIQUID_ACCOUNT_ADDRESS);
 
-  return {
+  const cfg: AppConfig = {
     sepoliaRpcUrl: env.SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com',
     sepoliaPrivateKey,
     sepoliaAddress,
@@ -223,4 +223,25 @@ export function loadConfig(): AppConfig {
     serverPublicUrl: env.SERVER_PUBLIC_URL || `http://127.0.0.1:${env.SERVER_PORT || 8787}`,
     pollIntervalMs: Number(env.POLL_INTERVAL_MS || 15000),
   };
+
+  // Mark secret fields non-enumerable so JSON.stringify / logging can never leak credentials
+  for (const secretField of [
+    'sepoliaPrivateKey',
+    'hyperliquidAgentPrivateKey',
+    'openRouterApiKey',
+    'telegramBotToken',
+    'bybitTestnetApiKey',
+    'bybitTestnetApiSecret',
+    'binanceTestnetApiKey',
+    'binanceTestnetApiSecret',
+  ] as const) {
+    Object.defineProperty(cfg, secretField, {
+      value: cfg[secretField],
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    });
+  }
+
+  return cfg;
 }
