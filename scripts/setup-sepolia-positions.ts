@@ -17,10 +17,10 @@ async function main() {
     throw new Error(`Need at least 0.005 Sepolia ETH on ${before.address} to seed Aave position.`);
   }
 
-  if (before.daiBalance < 500) {
-    console.log('[setup:sepolia] Minting 1000 AaveDAI from Aave Sepolia Faucet...');
-    const tx = await aave.mintFromFaucet({ token: 'DAI', amount: 1000 });
-    console.log(`  mint DAI tx: https://sepolia.etherscan.io/tx/${tx}`);
+  if ((before.eursBalance ?? 0) < 100) {
+    console.log('[setup:sepolia] Minting 200 AaveEURS (open-cap Sepolia stablecoin) from Aave Faucet...');
+    const tx = await aave.mintFromFaucet({ token: 'EURS', amount: 200 });
+    console.log(`  mint EURS tx: https://sepolia.etherscan.io/tx/${tx}`);
   }
 
   if (before.usdcBalance < 500) {
@@ -31,19 +31,22 @@ async function main() {
 
   const mid = await aave.readSnapshot();
   if (mid.totalCollateralUsd < 200) {
-    console.log('[setup:sepolia] Supplying 400 AaveDAI as collateral on Aave v3 Sepolia...');
+    console.log('[setup:sepolia] Minting & supplying 0.015 AaveWBTC (non-isolated collateral) on Aave v3 Sepolia...');
+    const mTx = await aave.mintFromFaucet({ token: 'WBTC', amount: 0.015 });
+    console.log(`  mint WBTC tx: https://sepolia.etherscan.io/tx/${mTx}`);
     const sup = await aave.supply({
-      token: 'DAI',
-      amount: 400,
-      thresholds: { ...DEFAULT_THRESHOLDS, maxUsdcAction: 1000, maxSingleActionUsd: 1000 },
+      token: 'WBTC',
+      amount: 0.015,
+      thresholds: { ...DEFAULT_THRESHOLDS, maxSingleActionUsd: 2500 },
     });
-    console.log(`  supply DAI tx: ${sup.explorerUrl}`);
+    console.log(`  supply WBTC tx: ${sup.explorerUrl}`);
   }
 
   const afterSup = await aave.readSnapshot();
-  if (afterSup.totalDebtUsd < 50) {
-    console.log('[setup:sepolia] Borrowing 220 AaveUSDC on Aave v3 Sepolia...');
-    const bTx = await aave.borrowForDemoSetup({ token: 'USDC', amount: 220 });
+  if (afterSup.totalDebtUsd < 50 && afterSup.availableBorrowsUsd > 60) {
+    const borrowAmt = Math.max(50, Math.floor(afterSup.availableBorrowsUsd * 0.85));
+    console.log(`[setup:sepolia] Borrowing ${borrowAmt} AaveUSDC on Aave v3 Sepolia (avail $${afterSup.availableBorrowsUsd.toFixed(0)})...`);
+    const bTx = await aave.borrowForDemoSetup({ token: 'USDC', amount: borrowAmt });
     console.log(`  borrow USDC tx: https://sepolia.etherscan.io/tx/${bTx}`);
   }
 

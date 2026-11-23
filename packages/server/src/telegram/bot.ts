@@ -96,6 +96,26 @@ export class TelegramBotService {
     return this.api('getMe');
   }
 
+  async discoverChatIdFromUpdates(): Promise<string | null> {
+    if (!this.isConfigured) return null;
+    if (this.lastKnownChatId) return this.lastKnownChatId;
+    try {
+      const updates = await this.api<
+        Array<{ update_id: number; message?: { chat?: { id?: number } } }>
+      >('getUpdates', { limit: 20, timeout: 0 });
+      for (let i = updates.length - 1; i >= 0; i--) {
+        const cid = updates[i]?.message?.chat?.id;
+        if (cid !== undefined) {
+          this.lastKnownChatId = String(cid);
+          return this.lastKnownChatId;
+        }
+      }
+    } catch {
+      // ignore discovery error
+    }
+    return null;
+  }
+
   async sendMessage(
     chatId: string,
     text: string,

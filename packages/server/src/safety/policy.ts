@@ -25,6 +25,7 @@ export const ALLOWED_APPROVE_TOKENS = new Set<string>(
     SEPOLIA_TOKENS.AAVE_DAI.address,
     SEPOLIA_TOKENS.AAVE_WETH.address,
     SEPOLIA_TOKENS.AAVE_WBTC.address,
+    SEPOLIA_TOKENS.AAVE_EURS.address,
   ].map((a) => a.toLowerCase()),
 );
 

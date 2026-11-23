@@ -5,6 +5,7 @@ export interface AaveReserveRate {
   address: string;
   supplyApyPct: number;
   borrowApyPct: number;
+  supplyCapReached?: boolean;
 }
 
 export interface AaveSnapshot {
@@ -18,6 +19,7 @@ export interface AaveSnapshot {
   ltvPct: number;
   usdcBalance: number;
   daiBalance: number;
+  eursBalance?: number;
   ethBalance: number;
   rates: AaveReserveRate[];
   error?: string;

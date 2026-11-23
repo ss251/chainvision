@@ -6,8 +6,7 @@
  *  3. One real signed testnet transaction per protocol (Aave, Uniswap, Hyperliquid)
  *  4. One live Telegram receipt message
  *
- * Writes sanitized proof JSON (ZERO secrets) to PROOF_OUT or
- * /Users/thescoho/Developer/firstmate/data/chainvision-p1/verify-testnet-proof.json.
+ * Writes sanitized proof JSON (ZERO secrets) to PROOF_OUT when set.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -192,14 +191,17 @@ async function main() {
           },
         };
       }
-      const res = await aave.supply({ token: 'USDC', amount: 5, thresholds: DEFAULT_THRESHOLDS });
+      if ((snap.eursBalance ?? 0) < 10) {
+        await aave.mintFromFaucet({ token: 'EURS', amount: 100 });
+      }
+      const res = await aave.supply({ token: 'EURS', amount: 5, thresholds: DEFAULT_THRESHOLDS });
       lastReceipt = {
         id: `verify_aave_${Date.now()}`,
         actionId: 'verify',
         protocol: 'aave',
         actionType: 'aave_supply',
         network: 'sepolia',
-        summary: 'AAVE SUPPLY 5 USDC',
+        summary: 'AAVE SUPPLY 5 EURS',
         beforeFact: `COLLAT $${res.before.totalCollateralUsd.toFixed(2)}`,
         afterFact: `COLLAT $${res.after.totalCollateralUsd.toFixed(2)}`,
         txHashOrOrderId: res.txHash,
@@ -285,10 +287,21 @@ async function main() {
 
     // 6. Live Telegram receipt post
     const rTg = await runCheck('receipt:telegram', async () => {
-      if (!telegram.isConfigured || !telegram.chatId) {
+      if (!telegram.isConfigured) {
         return {
           status: 'SKIPPED',
-          details: { reason: 'TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured' },
+          details: { reason: 'TELEGRAM_BOT_TOKEN not configured' },
+        };
+      }
+      const chatId = telegram.chatId ?? (await telegram.discoverChatIdFromUpdates());
+      if (!chatId) {
+        const me = await telegram.getMe();
+        return {
+          status: 'SKIPPED',
+          details: {
+            reason: `Waiting for user to tap /start on @${me.username ?? 'bot'} so chat_id is available`,
+            botUsername: me.username ?? null,
+          },
         };
       }
       const sampleReceipt: ExecutionReceipt = lastReceipt ?? {
@@ -305,12 +318,13 @@ async function main() {
         telegramPosted: false,
         timestamp: Date.now(),
       };
-      const out = await telegram.sendReceipt(sampleReceipt);
+      const out = await telegram.sendReceipt(sampleReceipt, chatId);
       if (!out.sent) throw new Error(out.error ?? 'Failed to post Telegram receipt');
       return {
         details: {
           messageId: out.messageId,
           receiptId: sampleReceipt.id,
+          explorerUrl: sampleReceipt.explorerUrl,
         },
       };
     });
@@ -335,11 +349,10 @@ async function main() {
     `\nSummary: ${summary.passed} PASS, ${summary.skipped} SKIPPED, ${summary.failed} FAIL in ${(totalMs / 1000).toFixed(1)}s`,
   );
 
-  const outPath =
-    process.env.PROOF_OUT ||
-    '/Users/thescoho/Developer/firstmate/data/chainvision-p1/verify-testnet-proof.json';
-  const dir = path.dirname(outPath);
-  if (fs.existsSync(dir)) {
+  const outPath = process.env.PROOF_OUT;
+  if (outPath) {
+    const dir = path.dirname(outPath);
+    fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(outPath, JSON.stringify(summary, null, 2));
     console.log(`Proof written to ${outPath}`);
   }

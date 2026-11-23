@@ -56,6 +56,11 @@ export const SEPOLIA_TOKENS = {
     address: '0x29f2D40B0605204364af54EC677bD022dA425d03',
     decimals: 8,
   },
+  AAVE_EURS: {
+    symbol: 'EURS',
+    address: '0x6d906e526a4e2Ca02097BA9d0caA3c382F52278E',
+    decimals: 2,
+  },
 } as const;
 
 export interface AppConfig {
@@ -106,14 +111,12 @@ function parseEnvFile(filePath: string): Record<string, string> {
 
 function loadLayeredEnv(): Record<string, string> {
   // Lower priority first, higher priority overwrites.
-  // Dedicated secrets.env outside the repo takes priority over local-keys.env and .env,
-  // while avoiding leaking unrelated host shell tokens (e.g. a different Telegram bot).
+  // Optional CHAINVISION_ENV_FILE / CHAINVISION_SECRETS_FILE allow keeping keys outside the repo.
   const repoRoot = path.resolve(import.meta.dirname, '../../..');
   const candidates = [
     path.join(repoRoot, '.env'),
-    '/Users/thescoho/Developer/firstmate/data/chainvision-p1/local-keys.env',
-    '/Users/thescoho/Developer/firstmate/data/chainvision-p1/secrets.env',
-    process.env.CHAINVISION_ENV_FILE ?? '',
+    ...(process.env.CHAINVISION_ENV_FILE ? process.env.CHAINVISION_ENV_FILE.split(path.delimiter) : []),
+    ...(process.env.CHAINVISION_SECRETS_FILE ? process.env.CHAINVISION_SECRETS_FILE.split(path.delimiter) : []),
   ].filter(Boolean);
 
   const merged: Record<string, string> = {};

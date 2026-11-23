@@ -80,8 +80,10 @@ function truncateLine(text: string, maxLen: number): string {
 
 function fmtUsd(n: number): string {
   if (!Number.isFinite(n)) return '$0';
-  if (Math.abs(n) >= 1000) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
+  const sign = n < 0 ? '-' : '';
+  const abs = Math.abs(n);
+  if (abs >= 1000) return `${sign}$${abs.toFixed(0)}`;
+  return `${sign}$${abs.toFixed(2)}`;
 }
 
 /**
@@ -299,10 +301,12 @@ export function renderLensPage(state: LensViewState): LensPageLayout {
       const hf = s.aave.healthFactor === null ? 'NO DEBT' : s.aave.healthFactor.toFixed(2);
       const hfRatio = s.aave.healthFactor === null ? 1 : Math.min(1, s.aave.healthFactor / 3);
       const usdcRate = s.aave.rates.find((r) => r.symbol === 'USDC');
+      const eursRate = s.aave.rates.find((r) => r.symbol === 'EURS');
+      const displayRate = usdcRate?.supplyCapReached && eursRate ? eursRate : usdcRate;
       body = [
         `HEALTH: ${hf}  ${renderBar(hfRatio, 10)}`,
         `COLLAT: ${fmtUsd(s.aave.totalCollateralUsd)}  DEBT: ${fmtUsd(s.aave.totalDebtUsd)}`,
-        `TESTNET USDC APY: ${usdcRate ? usdcRate.supplyApyPct.toFixed(1) : '0.0'}%  BAL: ${s.aave.usdcBalance.toFixed(1)}`,
+        `TESTNET ${displayRate?.symbol ?? 'USDC'} APY: ${displayRate ? displayRate.supplyApyPct.toFixed(1) : '0.0'}%  USDC: ${s.aave.usdcBalance.toFixed(0)}`,
       ].join('\n');
     } else if (idx === 1) {
       header = 'HYPERLIQUID TESTNET · 2/4';

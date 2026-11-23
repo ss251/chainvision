@@ -31,6 +31,7 @@ const AAVE_POOL_ABI = parseAbi([
 
 const DATA_PROVIDER_ABI = parseAbi([
   'function getReserveData(address asset) view returns (uint256 unbacked, uint256 accruedToTreasuryScaled, uint256 totalAToken, uint256 totalStableDebt, uint256 totalVariableDebt, uint256 liquidityRate, uint256 variableBorrowRate, uint256 stableBorrowRate, uint256 averageStableBorrowRate, uint256 liquidityIndex, uint256 variableBorrowIndex, uint40 lastUpdateTimestamp)',
+  'function getReserveCaps(address asset) view returns (uint256 borrowCap, uint256 supplyCap)',
 ]);
 
 const WETH_GATEWAY_ABI = parseAbi([
@@ -64,46 +65,81 @@ export class AaveSepoliaClient {
   async readSnapshot(overrideAddress?: `0x${string}`): Promise<AaveSnapshot> {
     const address = overrideAddress ?? this.config.sepoliaAddress;
     try {
-      const [accountData, usdcReserve, daiReserve, wethReserve, usdcBal, daiBal, ethBal] =
-        await Promise.all([
-          this.publicClient.readContract({
-            address: AAVE_V3_SEPOLIA.pool,
-            abi: AAVE_POOL_ABI,
-            functionName: 'getUserAccountData',
-            args: [address],
-          }),
-          this.publicClient.readContract({
-            address: AAVE_V3_SEPOLIA.poolDataProvider,
-            abi: DATA_PROVIDER_ABI,
-            functionName: 'getReserveData',
-            args: [SEPOLIA_TOKENS.AAVE_USDC.address],
-          }),
-          this.publicClient.readContract({
-            address: AAVE_V3_SEPOLIA.poolDataProvider,
-            abi: DATA_PROVIDER_ABI,
-            functionName: 'getReserveData',
-            args: [SEPOLIA_TOKENS.AAVE_DAI.address],
-          }),
-          this.publicClient.readContract({
-            address: AAVE_V3_SEPOLIA.poolDataProvider,
-            abi: DATA_PROVIDER_ABI,
-            functionName: 'getReserveData',
-            args: [SEPOLIA_TOKENS.AAVE_WETH.address],
-          }),
-          this.publicClient.readContract({
-            address: SEPOLIA_TOKENS.AAVE_USDC.address,
-            abi: ERC20_ABI,
-            functionName: 'balanceOf',
-            args: [address],
-          }),
-          this.publicClient.readContract({
-            address: SEPOLIA_TOKENS.AAVE_DAI.address,
-            abi: ERC20_ABI,
-            functionName: 'balanceOf',
-            args: [address],
-          }),
-          this.publicClient.getBalance({ address }),
-        ]);
+      const [
+        accountData,
+        usdcReserve,
+        usdcCaps,
+        daiReserve,
+        daiCaps,
+        eursReserve,
+        wethReserve,
+        usdcBal,
+        daiBal,
+        eursBal,
+        ethBal,
+      ] = await Promise.all([
+        this.publicClient.readContract({
+          address: AAVE_V3_SEPOLIA.pool,
+          abi: AAVE_POOL_ABI,
+          functionName: 'getUserAccountData',
+          args: [address],
+        }),
+        this.publicClient.readContract({
+          address: AAVE_V3_SEPOLIA.poolDataProvider,
+          abi: DATA_PROVIDER_ABI,
+          functionName: 'getReserveData',
+          args: [SEPOLIA_TOKENS.AAVE_USDC.address],
+        }),
+        this.publicClient.readContract({
+          address: AAVE_V3_SEPOLIA.poolDataProvider,
+          abi: DATA_PROVIDER_ABI,
+          functionName: 'getReserveCaps',
+          args: [SEPOLIA_TOKENS.AAVE_USDC.address],
+        }),
+        this.publicClient.readContract({
+          address: AAVE_V3_SEPOLIA.poolDataProvider,
+          abi: DATA_PROVIDER_ABI,
+          functionName: 'getReserveData',
+          args: [SEPOLIA_TOKENS.AAVE_DAI.address],
+        }),
+        this.publicClient.readContract({
+          address: AAVE_V3_SEPOLIA.poolDataProvider,
+          abi: DATA_PROVIDER_ABI,
+          functionName: 'getReserveCaps',
+          args: [SEPOLIA_TOKENS.AAVE_DAI.address],
+        }),
+        this.publicClient.readContract({
+          address: AAVE_V3_SEPOLIA.poolDataProvider,
+          abi: DATA_PROVIDER_ABI,
+          functionName: 'getReserveData',
+          args: [SEPOLIA_TOKENS.AAVE_EURS.address],
+        }),
+        this.publicClient.readContract({
+          address: AAVE_V3_SEPOLIA.poolDataProvider,
+          abi: DATA_PROVIDER_ABI,
+          functionName: 'getReserveData',
+          args: [SEPOLIA_TOKENS.AAVE_WETH.address],
+        }),
+        this.publicClient.readContract({
+          address: SEPOLIA_TOKENS.AAVE_USDC.address,
+          abi: ERC20_ABI,
+          functionName: 'balanceOf',
+          args: [address],
+        }),
+        this.publicClient.readContract({
+          address: SEPOLIA_TOKENS.AAVE_DAI.address,
+          abi: ERC20_ABI,
+          functionName: 'balanceOf',
+          args: [address],
+        }),
+        this.publicClient.readContract({
+          address: SEPOLIA_TOKENS.AAVE_EURS.address,
+          abi: ERC20_ABI,
+          functionName: 'balanceOf',
+          args: [address],
+        }),
+        this.publicClient.getBalance({ address }),
+      ]);
 
       const [
         totalCollateralBase,
@@ -118,6 +154,13 @@ export class AaveSepoliaClient {
       const healthFactor =
         totalDebtBase === 0n ? null : Number(formatUnits(healthFactorRaw, 18));
 
+      const usdcCapFull =
+        usdcCaps[1] > 0n &&
+        Number(formatUnits(usdcReserve[2], SEPOLIA_TOKENS.AAVE_USDC.decimals)) >= Number(usdcCaps[1]);
+      const daiCapFull =
+        daiCaps[1] > 0n &&
+        Number(formatUnits(daiReserve[2], SEPOLIA_TOKENS.AAVE_DAI.decimals)) >= Number(daiCaps[1]);
+
       return {
         network: 'sepolia',
         address,
@@ -129,6 +172,7 @@ export class AaveSepoliaClient {
         ltvPct: Number(ltv) / 100,
         usdcBalance: Number(formatUnits(usdcBal, SEPOLIA_TOKENS.AAVE_USDC.decimals)),
         daiBalance: Number(formatUnits(daiBal, SEPOLIA_TOKENS.AAVE_DAI.decimals)),
+        eursBalance: Number(formatUnits(eursBal, SEPOLIA_TOKENS.AAVE_EURS.decimals)),
         ethBalance: Number(formatUnits(ethBal, 18)),
         rates: [
           {
@@ -136,18 +180,28 @@ export class AaveSepoliaClient {
             address: SEPOLIA_TOKENS.AAVE_USDC.address,
             supplyApyPct: (Number(usdcReserve[5]) / RAY) * 100,
             borrowApyPct: (Number(usdcReserve[6]) / RAY) * 100,
+            supplyCapReached: usdcCapFull,
+          },
+          {
+            symbol: 'EURS',
+            address: SEPOLIA_TOKENS.AAVE_EURS.address,
+            supplyApyPct: (Number(eursReserve[5]) / RAY) * 100,
+            borrowApyPct: (Number(eursReserve[6]) / RAY) * 100,
+            supplyCapReached: false,
           },
           {
             symbol: 'DAI',
             address: SEPOLIA_TOKENS.AAVE_DAI.address,
             supplyApyPct: (Number(daiReserve[5]) / RAY) * 100,
             borrowApyPct: (Number(daiReserve[6]) / RAY) * 100,
+            supplyCapReached: daiCapFull,
           },
           {
             symbol: 'WETH',
             address: SEPOLIA_TOKENS.AAVE_WETH.address,
             supplyApyPct: (Number(wethReserve[5]) / RAY) * 100,
             borrowApyPct: (Number(wethReserve[6]) / RAY) * 100,
+            supplyCapReached: false,
           },
         ],
       };
@@ -200,18 +254,30 @@ export class AaveSepoliaClient {
       args: [account.address, spender],
     });
     if (allowance < amount) {
+      // Bounded reusable approval (5x action amount) to conserve Sepolia gas across repeated demo runs
+      const approveAmount = amount * 5n;
       const hash = await walletClient.writeContract({
         address: token,
         abi: ERC20_ABI,
         functionName: 'approve',
-        args: [spender, amount],
+        args: [spender, approveAmount],
       });
       await this.publicClient.waitForTransactionReceipt({ hash });
+      for (let i = 0; i < 6; i++) {
+        const cur = await this.publicClient.readContract({
+          address: token,
+          abi: ERC20_ABI,
+          functionName: 'allowance',
+          args: [account.address, spender],
+        });
+        if (cur >= amount) break;
+        await new Promise((r) => setTimeout(r, 800));
+      }
     }
   }
 
   async supply(params: {
-    token: 'USDC' | 'DAI' | 'ETH';
+    token: 'USDC' | 'DAI' | 'ETH' | 'EURS' | 'WBTC';
     amount: number;
     thresholds: UserThresholds;
   }): Promise<{ txHash: `0x${string}`; explorerUrl: string; before: AaveSnapshot; after: AaveSnapshot }> {
@@ -220,6 +286,8 @@ export class AaveSepoliaClient {
 
     if (params.token === 'ETH') {
       assertWithinActionCaps({ amountEth: params.amount, thresholds: params.thresholds });
+    } else if (params.token === 'WBTC') {
+      assertWithinActionCaps({ amountUsd: params.amount * 100000, thresholds: params.thresholds });
     } else {
       assertWithinActionCaps({
         amountUsdc: params.amount,
@@ -243,7 +311,14 @@ export class AaveSepoliaClient {
         value,
       });
     } else {
-      const tok = params.token === 'USDC' ? SEPOLIA_TOKENS.AAVE_USDC : SEPOLIA_TOKENS.AAVE_DAI;
+      const tok =
+        params.token === 'USDC'
+          ? SEPOLIA_TOKENS.AAVE_USDC
+          : params.token === 'DAI'
+            ? SEPOLIA_TOKENS.AAVE_DAI
+            : params.token === 'EURS'
+              ? SEPOLIA_TOKENS.AAVE_EURS
+              : SEPOLIA_TOKENS.AAVE_WBTC;
       const amountRaw = parseUnits(params.amount.toString(), tok.decimals);
       await this.ensureApproval(tok.address, AAVE_V3_SEPOLIA.pool, amountRaw);
       assertAllowedEvmContract(AAVE_V3_SEPOLIA.pool, chainId);
@@ -255,7 +330,11 @@ export class AaveSepoliaClient {
       });
     }
 
-    await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+    if (receipt.status !== 'success') {
+      throw new Error(`Aave tx reverted: ${txHash}`);
+    }
+    await new Promise((r) => setTimeout(r, 2500));
     const after = await this.readSnapshot(account.address);
     return {
       txHash,
@@ -291,7 +370,11 @@ export class AaveSepoliaClient {
       functionName: 'repay',
       args: [tok.address, amountRaw, 2n, account.address],
     });
-    await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+    if (receipt.status !== 'success') {
+      throw new Error(`Aave tx reverted: ${txHash}`);
+    }
+    await new Promise((r) => setTimeout(r, 2500));
     const after = await this.readSnapshot(account.address);
     return {
       txHash,
@@ -321,7 +404,7 @@ export class AaveSepoliaClient {
   }
 
   async mintFromFaucet(params: {
-    token: 'USDC' | 'DAI' | 'WBTC';
+    token: 'USDC' | 'DAI' | 'WBTC' | 'EURS';
     amount: number;
   }): Promise<`0x${string}`> {
     const chainId = await this.publicClient.getChainId();
@@ -332,7 +415,9 @@ export class AaveSepoliaClient {
         ? SEPOLIA_TOKENS.AAVE_USDC
         : params.token === 'DAI'
           ? SEPOLIA_TOKENS.AAVE_DAI
-          : SEPOLIA_TOKENS.AAVE_WBTC;
+          : params.token === 'EURS'
+            ? SEPOLIA_TOKENS.AAVE_EURS
+            : SEPOLIA_TOKENS.AAVE_WBTC;
     const amountRaw = parseUnits(params.amount.toString(), tok.decimals);
     const txHash = await walletClient.writeContract({
       address: AAVE_V3_SEPOLIA.faucet,

@@ -302,13 +302,25 @@ export class UniswapSepoliaClient {
       args: [account.address, UNISWAP_V3_SEPOLIA.swapRouter02],
     });
     if (allowance < amountInRaw) {
+      const approveAmount = amountInRaw * 5n;
       const approveHash = await walletClient.writeContract({
         address: quote.route.tokenInAddress,
         abi: ERC20_ABI,
         functionName: 'approve',
-        args: [UNISWAP_V3_SEPOLIA.swapRouter02, amountInRaw],
+        args: [UNISWAP_V3_SEPOLIA.swapRouter02, approveAmount],
       });
       await this.publicClient.waitForTransactionReceipt({ hash: approveHash });
+      // Wait briefly for load-balanced Sepolia RPC replicas to observe the new allowance
+      for (let i = 0; i < 6; i++) {
+        const cur = await this.publicClient.readContract({
+          address: quote.route.tokenInAddress,
+          abi: ERC20_ABI,
+          functionName: 'allowance',
+          args: [account.address, UNISWAP_V3_SEPOLIA.swapRouter02],
+        });
+        if (cur >= amountInRaw) break;
+        await new Promise((r) => setTimeout(r, 800));
+      }
     }
 
     const txHash = await walletClient.writeContract({

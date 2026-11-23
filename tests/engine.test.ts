@@ -167,6 +167,23 @@ describe('ChainVisionEngine watcher, pairing & receipts', () => {
     expect(action?.comparisonLine).toContain('TESTNET');
   });
 
+  it('routes voice USDC supply transparently to EURS when Sepolia USDC supply cap is reached', async () => {
+    const engine = new ChainVisionEngine(loadConfig());
+    const snap = makeSnapshots();
+    snap.aave.rates = [
+      { symbol: 'USDC', address: '0x94a9', supplyApyPct: 57.59, borrowApyPct: 60, supplyCapReached: true },
+      { symbol: 'EURS', address: '0x6d90', supplyApyPct: 2.26, borrowApyPct: 3.28, supplyCapReached: false },
+    ];
+    const action = await engine.buildActionFromIntent(
+      { action: 'aave_supply', token: 'USDC', amount: 200, compareVenues: true, confidence: 0.95 },
+      snap,
+    );
+    expect(action).not.toBeNull();
+    expect(action?.params.tokenIn).toBe('EURS');
+    expect(action?.headline).toContain('USDC CAP FULL');
+    expect(action?.factLine).toContain('AAVE 2.3% APY');
+  });
+
   it('formats Telegram receipts with testnet & non-advice notice', () => {
     const receipt = {
       id: 'r1',

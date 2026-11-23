@@ -362,9 +362,17 @@ export class ChainVisionEngine {
 
     if (intent.action === 'aave_supply') {
       const capped = Math.min(intent.amount, intent.token === 'ETH' ? th.maxEvmSwapEth : th.maxUsdcAction);
-      const aaveRate =
-        snap.aave.rates.find((r) => r.symbol === (intent.token === 'ETH' ? 'WETH' : intent.token))
-          ?.supplyApyPct ?? 0;
+      const requestedRate = snap.aave.rates.find(
+        (r) => r.symbol === (intent.token === 'ETH' ? 'WETH' : intent.token),
+      );
+      // On Sepolia, USDC/DAI pools can reach their testnet supply cap (Aave error 51).
+      // Detect that live on-chain and route stablecoin supply to open-cap EURS transparently.
+      const capFull = Boolean(requestedRate?.supplyCapReached && (intent.token === 'USDC' || intent.token === 'DAI'));
+      const effectiveToken = capFull ? 'EURS' : intent.token;
+      const effectiveRate =
+        snap.aave.rates.find((r) => r.symbol === (effectiveToken === 'ETH' ? 'WETH' : effectiveToken))
+          ?.supplyApyPct ?? requestedRate?.supplyApyPct ?? 0;
+
       // Compare like with like: all annualized yields on testnets
       // Exchange perp funding settles 3x/day (every 8h); Hyperliquid settles hourly (24x/day)
       const exAnnualApr = snap.exchange.ethFundingPct * 3 * 365;
@@ -374,11 +382,13 @@ export class ChainVisionEngine {
         source: 'voice',
         protocol: 'aave',
         actionType: 'aave_supply',
-        headline: `AAVE SUPPLY ${capped} ${intent.token} (SEPOLIA TESTNET)`,
-        factLine: `AAVE ${aaveRate.toFixed(1)}% APY · HL ${hlAnnualApr.toFixed(1)}% APR · EX ${exAnnualApr.toFixed(1)}% APR`,
-        comparisonLine: `TESTNET RATES (ANNUAL) · CAP ${th.maxUsdcAction} USDC`,
-        actionPrompt: `SUPPLY ${capped} ${intent.token}`,
-        params: { tokenIn: intent.token, amount: capped },
+        headline: capFull
+          ? `AAVE SUPPLY ${capped} EURS (SEPOLIA ${intent.token} CAP FULL)`
+          : `AAVE SUPPLY ${capped} ${effectiveToken} (SEPOLIA TESTNET)`,
+        factLine: `AAVE ${effectiveRate.toFixed(1)}% APY · HL ${hlAnnualApr.toFixed(1)}% APR · EX ${exAnnualApr.toFixed(1)}% APR`,
+        comparisonLine: `TESTNET RATES (ANNUAL) · CAP ${th.maxUsdcAction} STABLES`,
+        actionPrompt: `SUPPLY ${capped} ${effectiveToken}`,
+        params: { tokenIn: effectiveToken, amount: capped },
         createdAt: now,
         expiresAt: now + 90_000,
         requiresTap: true,
@@ -509,9 +519,17 @@ export class ChainVisionEngine {
           timestamp: Date.now(),
         };
       } else if (action.actionType === 'aave_supply') {
-        const token = (action.params.tokenIn ?? 'USDC') as 'USDC' | 'DAI' | 'ETH';
+        const token = (action.params.tokenIn ?? 'EURS') as 'USDC' | 'DAI' | 'ETH' | 'EURS';
         const amount = action.params.amount ?? 10;
         const res = await this.aave.supply({ token, amount, thresholds: th });
+        const beforeFact =
+          token === 'EURS'
+            ? `WALLET ${(res.before.eursBalance ?? 0).toFixed(1)} EURS`
+            : `COLLAT $${res.before.totalCollateralUsd.toFixed(1)}`;
+        const afterFact =
+          token === 'EURS'
+            ? `WALLET ${(res.after.eursBalance ?? 0).toFixed(1)} EURS`
+            : `COLLAT $${res.after.totalCollateralUsd.toFixed(1)}`;
         receipt = {
           id: `rcpt_${crypto.randomBytes(4).toString('hex')}`,
           actionId: action.id,
@@ -519,8 +537,8 @@ export class ChainVisionEngine {
           actionType: 'aave_supply',
           network: 'sepolia',
           summary: `AAVE SUPPLY ${amount} ${token}`,
-          beforeFact: `COLLAT $${res.before.totalCollateralUsd.toFixed(1)}`,
-          afterFact: `COLLAT $${res.after.totalCollateralUsd.toFixed(1)}`,
+          beforeFact,
+          afterFact,
           txHashOrOrderId: res.txHash,
           explorerUrl: res.explorerUrl,
           telegramPosted: false,

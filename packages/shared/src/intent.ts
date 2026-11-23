@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const VoiceIntentSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('aave_supply'),
-    token: z.enum(['USDC', 'DAI', 'ETH']),
+    token: z.enum(['USDC', 'DAI', 'ETH', 'EURS']),
     amount: z.number().positive(),
     compareVenues: z.boolean().default(true),
     confidence: z.number().min(0).max(1).default(0.9),
