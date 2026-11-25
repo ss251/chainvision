@@ -86,6 +86,7 @@ export interface AppConfig {
   serverPort: number;
   serverPublicUrl: string;
   pollIntervalMs: number;
+  stateFile: string | null;
 }
 
 function parseEnvFile(filePath: string): Record<string, string> {
@@ -146,6 +147,7 @@ function loadLayeredEnv(): Record<string, string> {
     'SERVER_PORT',
     'SERVER_PUBLIC_URL',
     'POLL_INTERVAL_MS',
+    'CHAINVISION_STATE_FILE',
   ]) {
     if (!merged[key] && process.env[key]) {
       merged[key] = process.env[key]!;
@@ -225,6 +227,7 @@ export function loadConfig(): AppConfig {
     serverPort: Number(env.SERVER_PORT || 8787),
     serverPublicUrl: env.SERVER_PUBLIC_URL || `http://127.0.0.1:${env.SERVER_PORT || 8787}`,
     pollIntervalMs: Number(env.POLL_INTERVAL_MS || 15000),
+    stateFile: env.CHAINVISION_STATE_FILE || null,
   };
 
   // Mark secret fields non-enumerable so JSON.stringify / logging can never leak credentials

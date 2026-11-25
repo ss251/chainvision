@@ -1,3 +1,5 @@
+import type { Signal } from './signal.js';
+
 export type ProtocolName = 'aave' | 'uniswap' | 'hyperliquid' | 'exchange';
 
 export interface AaveReserveRate {
@@ -71,6 +73,8 @@ export interface HyperliquidSnapshot {
   ethMarkPx: number;
   btcMarkPx: number;
   ethFundingPctHr: number;
+  /** Testnet mark prices by coin (ETH, BTC, SOL when listed). */
+  markPrices?: Record<string, number>;
   positions: HyperliquidPosition[];
   error?: string;
 }
@@ -174,6 +178,9 @@ export interface ExecutionReceipt {
 export type LensMode =
   | 'idle'
   | 'alert'
+  | 'signal'
+  | 'brief'
+  | 'notice'
   | 'confirm'
   | 'voice_listening'
   | 'executing'
@@ -186,6 +193,10 @@ export interface LensViewState {
   paired: boolean;
   pairingCode?: string;
   pendingAction?: PendingAction | null;
+  signal?: Signal | null;
+  queueSize?: number;
+  briefLines?: string[];
+  noticeText?: string;
   lastReceipt?: ExecutionReceipt | null;
   snapshots?: ProtocolSnapshots | null;
   positionPageIndex?: number;
@@ -203,7 +214,7 @@ export interface PairingSession {
 
 export type WsServerMessage =
   | { type: 'state'; state: LensViewState; session: PairingSession }
-  | { type: 'alert'; action: PendingAction }
+  | { type: 'signal'; signal: Signal }
   | { type: 'confirm'; action: PendingAction }
   | { type: 'executing'; actionId: string; label: string }
   | { type: 'receipt'; receipt: ExecutionReceipt }

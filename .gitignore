@@ -14,6 +14,10 @@ build/
 .env.*.local
 !.env.example
 
+# Local runtime state & simulator output
+.chainvision/
+sim-out/
+
 # Logs & OS
 *.log
 npm-debug.log*

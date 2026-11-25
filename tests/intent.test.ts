@@ -105,3 +105,47 @@ describe('Local voice intent parser (stub/fallback)', () => {
     expect(parseVoiceIntentLocally('swap 1 ETH on mainnet').action).toBe('unsupported');
   });
 });
+
+describe('brief and price alert intents', () => {
+  it('parses "what matters?" as a brief', () => {
+    expect(parseVoiceIntentLocally('what matters?').action).toBe('brief');
+    expect(parseVoiceIntentLocally('anything I need to know').action).toBe('brief');
+  });
+
+  it('parses below and above price alerts for ETH, BTC and SOL', () => {
+    expect(parseVoiceIntentLocally('tell me if ETH drops below 1700')).toMatchObject({
+      action: 'price_alert',
+      asset: 'ETH',
+      direction: 'below',
+      price: 1700,
+    });
+    expect(parseVoiceIntentLocally('alert me when bitcoin goes above 70,000')).toMatchObject({
+      action: 'price_alert',
+      asset: 'BTC',
+      direction: 'above',
+      price: 70000,
+    });
+    expect(parseVoiceIntentLocally('let me know if SOL falls under 120.5')).toMatchObject({
+      action: 'price_alert',
+      asset: 'SOL',
+      direction: 'below',
+      price: 120.5,
+    });
+  });
+
+  it('refuses alerts it cannot hold honestly', () => {
+    expect(parseVoiceIntentLocally('tell me if DOGE drops below 1').action).toBe('unsupported');
+    expect(parseVoiceIntentLocally('tell me when ETH hits 2000').action).toBe('unsupported');
+  });
+
+  it('validates model JSON for the new intents', () => {
+    expect(parseIntentJson('{"action":"price_alert","asset":"ETH","direction":"above","price":1800}')).toMatchObject({
+      action: 'price_alert',
+      direction: 'above',
+    });
+    expect(parseIntentJson('{"action":"price_alert","asset":"ETH","direction":"sideways","price":1800}').action).toBe(
+      'unsupported',
+    );
+    expect(parseIntentJson('{"action":"brief"}').action).toBe('brief');
+  });
+});

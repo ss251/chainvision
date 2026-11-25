@@ -34,6 +34,17 @@ export const VoiceIntentSchema = z.discriminatedUnion('action', [
     confidence: z.number().min(0).max(1).default(0.9),
   }),
   z.object({
+    action: z.literal('brief'),
+    confidence: z.number().min(0).max(1).default(0.9),
+  }),
+  z.object({
+    action: z.literal('price_alert'),
+    asset: z.enum(['ETH', 'BTC', 'SOL']),
+    direction: z.enum(['below', 'above']),
+    price: z.number().positive(),
+    confidence: z.number().min(0).max(1).default(0.9),
+  }),
+  z.object({
     action: z.literal('unsupported'),
     reason: z.string().min(1).max(140),
     confidence: z.number().min(0).max(1).default(1),
@@ -55,7 +66,12 @@ Convert the user's spoken crypto command into ONE JSON object matching one of th
    Use for: "trim half my ETH perp" (amountPct:50), "close ETH position" (amountPct:100), "reduce BTC by 25 percent".
 5) {"action":"status","protocol":"all"|"aave"|"uniswap"|"hyperliquid"|"exchange","confidence":0.95}
    Use for: "check my health factor", "show my positions".
-6) {"action":"unsupported","reason":"<short factual reason>","confidence":1}
+6) {"action":"brief","confidence":0.95}
+   Use for: "what matters?", "anything I need to know?", "brief me", "what needs me?".
+7) {"action":"price_alert","asset":"ETH"|"BTC"|"SOL","direction":"below"|"above","price":<number>,"confidence":0.95}
+   Use for: "tell me if ETH drops below 1700" (direction:"below"), "alert me when BTC goes above 70000" (direction:"above"), "let me know if SOL falls under 120".
+   Only ETH, BTC and SOL are supported; any other asset, or no clear direction or price, is unsupported.
+8) {"action":"unsupported","reason":"<short factual reason>","confidence":1}
    Use for: withdrawals, transfers to external wallets, mainnet requests, financial advice questions, or unclear commands.
 
 Output ONLY valid JSON with no markdown fences and no extra text.`;
@@ -149,6 +165,30 @@ export function parseVoiceIntentLocally(transcript: string): VoiceIntent {
   // Hard safety blocks: never withdraw, transfer out, or touch mainnet
   if (/\b(withdraw|send to|transfer out|mainnet|drain|private key|seed phrase)\b/.test(lower)) {
     return { action: 'unsupported', reason: 'Blocked: withdrawals and mainnet actions are disabled', confidence: 1 };
+  }
+
+  // Brief: "what matters?", "anything I need to know?"
+  if (/\b(what matters|what needs me|what('s| is) important|anything i (need|should) (to )?know|brief me|briefing)\b/.test(lower)) {
+    return { action: 'brief', confidence: 0.92 };
+  }
+
+  // Price alert: "tell me if ETH drops below 1700", "alert me when BTC goes above 70000"
+  if (/\b(tell me|alert me|notify me|let me know|warn me|ping me)\b/.test(lower)) {
+    const asset = /\b(btc|bitcoin)\b/.test(lower)
+      ? 'BTC'
+      : /\b(sol|solana)\b/.test(lower)
+        ? 'SOL'
+        : /\b(eth|ether|ethereum)\b/.test(lower)
+          ? 'ETH'
+          : null;
+    const below = /\b(below|under|beneath|drops?|falls?|dips?|sinks?)\b/.test(lower);
+    const above = /\b(above|over|rises?|climbs?|exceeds?)\b/.test(lower);
+    const priceMatch = lower.replace(/,/g, '').match(/\$?(\d+(?:\.\d+)?)/);
+    const price = priceMatch?.[1] ? Number(priceMatch[1]) : NaN;
+    if (!asset || below === above || !Number.isFinite(price) || price <= 0) {
+      return { action: 'unsupported', reason: 'Alerts need ETH, BTC or SOL, below or above, and a price', confidence: 0.9 };
+    }
+    return { action: 'price_alert', asset, direction: below ? 'below' : 'above', price, confidence: 0.92 };
   }
 
   // 1. Aave repay: "repay 300 USDC", "pay back 100 DAI"

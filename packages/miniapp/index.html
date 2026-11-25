@@ -72,6 +72,17 @@
         border: 1px solid var(--green);
       }
       .status { font-size: 12px; color: var(--muted); margin-top: 8px; word-break: break-all; }
+      .rule { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+      .rule button { width: auto; margin: 0; padding: 6px 10px; font-size: 12px; }
+      select {
+        width: 100%;
+        background: #0a100c;
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 14px;
+      }
       .pill {
         display: inline-block;
         padding: 3px 8px;
@@ -147,7 +158,27 @@
     </div>
 
     <div class="card">
-      <h2>4. Live Testnet Snapshot</h2>
+      <h2>4. Price Alerts</h2>
+      <div class="status">Set by voice ("tell me if ETH drops below 1700") or here. Each alert fires once on the Hyperliquid testnet mark price, then leaves this list.</div>
+      <div id="alert-list" class="status">Loading alerts...</div>
+      <div class="grid">
+        <div>
+          <label for="alert-asset">Asset</label>
+          <select id="alert-asset"><option>ETH</option><option>BTC</option><option>SOL</option></select>
+        </div>
+        <div>
+          <label for="alert-direction">When price goes</label>
+          <select id="alert-direction"><option value="below">below</option><option value="above">above</option></select>
+        </div>
+      </div>
+      <label for="alert-price">Price (USD, testnet)</label>
+      <input id="alert-price" type="number" step="0.01" placeholder="1700" />
+      <button id="btn-alert-add" class="secondary" type="button">Add Alert</button>
+      <div id="alert-status" class="status"></div>
+    </div>
+
+    <div class="card">
+      <h2>5. Live Testnet Snapshot</h2>
       <div id="live-snap" class="status">Loading live data...</div>
       <button id="btn-refresh" class="secondary" type="button">Refresh Live Data</button>
     </div>

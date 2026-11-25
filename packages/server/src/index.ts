@@ -43,7 +43,9 @@ const MIME: Record<string, string> = {
 
 export function createServer() {
   const config = loadConfig();
-  const engine = new ChainVisionEngine(config);
+  const engine = new ChainVisionEngine(config, {
+    stateFile: config.stateFile ?? path.resolve(import.meta.dirname, '../../../.chainvision/state.json'),
+  });
   const miniappDist = path.resolve(import.meta.dirname, '../../miniapp/dist');
 
   const server = http.createServer(async (req, res) => {
@@ -117,6 +119,7 @@ export function createServer() {
           transcript: body.transcript ?? '',
           parse: out.parse,
           pendingAction: out.pendingAction,
+          alert: out.alert,
           state: engine.getLensState(),
         });
         return;
@@ -131,6 +134,7 @@ export function createServer() {
           stt,
           parse: out.parse,
           pendingAction: out.pendingAction,
+          alert: out.alert,
           state: engine.getLensState(),
         });
         return;
@@ -154,8 +158,43 @@ export function createServer() {
       if (req.method === 'POST' && url.pathname === '/api/actions/dismiss') {
         const raw = (await readBody(req)).toString('utf8');
         const body = JSON.parse(raw || '{}') as { actionId?: string };
-        engine.dismissToBlank(body.actionId);
+        engine.dismissToBlank();
         sendJson(res, 200, { ok: true, state: engine.getLensState() });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/signals') {
+        sendJson(res, 200, { ok: true, signals: engine.queue.ranked(Date.now()) });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/brief') {
+        const lines = engine.showBrief();
+        sendJson(res, 200, { ok: true, lines, state: engine.getLensState() });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/alerts') {
+        sendJson(res, 200, { ok: true, rules: engine.listAlerts() });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/alerts') {
+        const raw = (await readBody(req)).toString('utf8');
+        const body = JSON.parse(raw || '{}') as { asset?: string; direction?: string; price?: number };
+        const result = await engine.addAlert(
+          { asset: String(body.asset ?? '').toUpperCase(), direction: String(body.direction ?? ''), price: Number(body.price) },
+          'miniapp',
+        );
+        sendJson(res, result.ok ? 200 : 400, result);
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/alerts/remove') {
+        const raw = (await readBody(req)).toString('utf8');
+        const body = JSON.parse(raw || '{}') as { id?: string };
+        const removed = engine.removeAlert(String(body.id ?? ''));
+        sendJson(res, removed ? 200 : 404, { ok: removed, rules: engine.listAlerts() });
         return;
       }
 
@@ -214,7 +253,7 @@ export function createServer() {
         if (msg.type === 'tap_confirm') {
           await engine.confirmPendingAction(msg.actionId);
         } else if (msg.type === 'dismiss') {
-          engine.dismissToBlank(msg.actionId);
+          engine.dismissToBlank();
         } else if (msg.type === 'cycle_view') {
           engine.cyclePositionView();
         } else if (msg.type === 'request_sync') {

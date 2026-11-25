@@ -48,6 +48,10 @@ document.getElementById('btn-positions')?.addEventListener('click', () => {
   void controller.cyclePositions();
 });
 
+document.getElementById('btn-brief')?.addEventListener('click', () => {
+  void controller.showBrief();
+});
+
 document.getElementById('btn-blank')?.addEventListener('click', () => {
   void controller.dismissToBlank();
 });
