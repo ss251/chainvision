@@ -1,5 +1,6 @@
 import EthereumProvider from '@walletconnect/ethereum-provider';
 import { describeRule, type PairingSession, type PriceAlertRule, type ProtocolSnapshots } from '@chainvision/shared';
+import './ton.js';
 
 declare global {
   interface Window {

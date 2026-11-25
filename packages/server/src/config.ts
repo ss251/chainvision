@@ -87,6 +87,10 @@ export interface AppConfig {
   serverPublicUrl: string;
   pollIntervalMs: number;
   stateFile: string | null;
+  tonTestnetMnemonic: string | null;
+  toncenterApiKey: string | null;
+  tonMainnetWatchAddress: string | null;
+  tonLowBalanceTon: number;
 }
 
 function parseEnvFile(filePath: string): Record<string, string> {
@@ -148,6 +152,8 @@ function loadLayeredEnv(): Record<string, string> {
     'SERVER_PUBLIC_URL',
     'POLL_INTERVAL_MS',
     'CHAINVISION_STATE_FILE',
+    'TON_MAINNET_WATCH_ADDRESS',
+    'TON_LOW_BALANCE_TON',
   ]) {
     if (!merged[key] && process.env[key]) {
       merged[key] = process.env[key]!;
@@ -228,6 +234,10 @@ export function loadConfig(): AppConfig {
     serverPublicUrl: env.SERVER_PUBLIC_URL || `http://127.0.0.1:${env.SERVER_PORT || 8787}`,
     pollIntervalMs: Number(env.POLL_INTERVAL_MS || 15000),
     stateFile: env.CHAINVISION_STATE_FILE || null,
+    tonTestnetMnemonic: env.TON_TESTNET_MNEMONIC || null,
+    toncenterApiKey: env.TONCENTER_API_KEY || null,
+    tonMainnetWatchAddress: env.TON_MAINNET_WATCH_ADDRESS || null,
+    tonLowBalanceTon: Number(env.TON_LOW_BALANCE_TON || 0.5),
   };
 
   // Mark secret fields non-enumerable so JSON.stringify / logging can never leak credentials
@@ -240,6 +250,8 @@ export function loadConfig(): AppConfig {
     'bybitTestnetApiSecret',
     'binanceTestnetApiKey',
     'binanceTestnetApiSecret',
+    'tonTestnetMnemonic',
+    'toncenterApiKey',
   ] as const) {
     Object.defineProperty(cfg, secretField, {
       value: cfg[secretField],

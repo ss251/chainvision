@@ -1,8 +1,8 @@
 import type { PendingAction } from './types.js';
 import { sanitizeForG2 } from './text.js';
 
-export type SignalSource = 'aave' | 'uniswap' | 'hyperliquid' | 'exchange' | 'price_alert';
-export type SignalKind = 'loan_health' | 'lp_range' | 'liquidation_distance' | 'price_cross';
+export type SignalSource = 'aave' | 'uniswap' | 'hyperliquid' | 'exchange' | 'price_alert' | 'telegram' | 'ton';
+export type SignalKind = 'loan_health' | 'lp_range' | 'liquidation_distance' | 'price_cross' | 'money_request' | 'incoming_payment' | 'low_balance';
 export type SignalSeverity = 'critical' | 'warning' | 'notice';
 
 /** Longest fact a signal with an action may carry; with " - TAP: <prompt>" the lens line stays within SIGNAL_LENS_LINE_MAX. */

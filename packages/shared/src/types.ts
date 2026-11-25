@@ -117,6 +117,10 @@ export interface UserThresholds {
   maxSingleActionUsd: number;
   maxEvmSwapEth: number;
   maxUsdcAction: number;
+  /** Largest single Telegram money request the wearer can pay in testnet TON. */
+  maxRequestTon: number;
+  /** Most testnet TON paid to requesters in any rolling 24 hours. */
+  dailyRequestTon: number;
 }
 
 export const DEFAULT_THRESHOLDS: UserThresholds = {
@@ -129,18 +133,21 @@ export const DEFAULT_THRESHOLDS: UserThresholds = {
   maxSingleActionUsd: 1000,
   maxEvmSwapEth: 0.25,
   maxUsdcAction: 500,
+  maxRequestTon: 2,
+  dailyRequestTon: 5,
 };
 
 export type ExecutableActionType =
   | 'aave_repay'
   | 'aave_supply'
   | 'uniswap_swap'
-  | 'hl_trim';
+  | 'hl_trim'
+  | 'ton_payout';
 
 export interface PendingAction {
   id: string;
-  source: 'watcher' | 'voice';
-  protocol: 'aave' | 'uniswap' | 'hyperliquid';
+  source: 'watcher' | 'voice' | 'telegram';
+  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'ton';
   actionType: ExecutableActionType;
   headline: string;
   factLine: string;
@@ -154,6 +161,8 @@ export interface PendingAction {
     coin?: string;
     slippageBps?: number;
     feeTier?: number;
+    to?: string;
+    requestId?: string;
   };
   createdAt: number;
   expiresAt: number;
@@ -163,9 +172,9 @@ export interface PendingAction {
 export interface ExecutionReceipt {
   id: string;
   actionId: string;
-  protocol: 'aave' | 'uniswap' | 'hyperliquid';
+  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'ton';
   actionType: ExecutableActionType;
-  network: 'sepolia' | 'hyperliquid-testnet';
+  network: 'sepolia' | 'hyperliquid-testnet' | 'ton-testnet';
   summary: string;
   beforeFact: string;
   afterFact: string;

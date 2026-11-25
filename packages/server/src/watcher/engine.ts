@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {
+  BRIEF_EMPTY_TEXT,
   BRIEF_MAX_LINES,
   BRIEF_SHOW_MS,
   DEFAULT_THRESHOLDS,
@@ -15,6 +16,9 @@ import {
   priceAlertSignal,
   rankSignals,
   ruleCrossed,
+  parseTonAmount,
+  tonReadOnlyBriefLine,
+  tonWalletSignals,
   type AlertAsset,
   type AlertDirection,
   type ExecutionReceipt,
@@ -27,6 +31,7 @@ import {
   type Signal,
   type SignalSeverity,
   type SignalSource,
+  type TonWalletSnapshot,
   type UserThresholds,
   type VoiceIntent,
   type WsServerMessage,
@@ -37,6 +42,10 @@ import { ExchangeTestnetWatcher } from '../protocols/exchange.js';
 import { HyperliquidTestnetClient } from '../protocols/hyperliquid.js';
 import { UniswapSepoliaClient } from '../protocols/uniswap.js';
 import { StateStore } from '../store.js';
+import { parseTonAddress, testnetFriendly } from '../ton/address.js';
+import { Toncenter } from '../ton/toncenter.js';
+import { TonRequestRail, TonTransferError, type TonRequestDesk } from '../ton/requests.js';
+import { TonTestnetWallet, readTonBalance } from '../ton/wallet.js';
 import { TelegramBotService } from '../telegram/bot.js';
 import { type IntentParseResult, VoiceIntentService } from '../voice/openrouter.js';
 import { WhisperSttService } from '../voice/stt.js';
@@ -58,7 +67,14 @@ const OVERLAY_AUTO_BLANK_MS: Partial<Record<Overlay, number>> = {
   error: SIGNAL_SHOW_MS,
 };
 
-type WatcherSource = Exclude<SignalSource, 'price_alert'>;
+type WatcherSource = Exclude<SignalSource, 'price_alert' | 'telegram' | 'ton'>;
+
+export interface TonConnectedWallet {
+  /** Testnet, non-bounceable form. */
+  address: string;
+  balanceNano: string | null;
+  connectedAt: number;
+}
 
 export type AlertResult = { ok: true; rule: PriceAlertRule } | { ok: false; reason: string };
 
@@ -77,6 +93,17 @@ export class ChainVisionEngine {
   readonly intents: VoiceIntentService;
   readonly telegram: TelegramBotService;
   readonly queue = new SignalQueue();
+  readonly tonWallet: TonTestnetWallet;
+  readonly tonRail: TonRequestRail;
+  /** The Telegram money-request model TON requests are paid from; the request flow plugs it in. */
+  tonRequests: TonRequestDesk | null = null;
+  private readonly tonMainnet: Toncenter;
+  private tonSnapshot: TonWalletSnapshot | null = null;
+  private tonPrevBalance: bigint | null = null;
+  private tonLowSince: number | null = null;
+  private tonConnected: TonConnectedWallet | null = null;
+  private tonMainnetNano: string | null = null;
+  private tonTimer: ReturnType<typeof setInterval> | null = null;
 
   private readonly store: StateStore;
   private session: PairingSession;
@@ -107,6 +134,9 @@ export class ChainVisionEngine {
     this.intents = new VoiceIntentService(config);
     this.telegram = new TelegramBotService(config);
     this.store = new StateStore(options.stateFile ?? null);
+    this.tonWallet = new TonTestnetWallet(config.tonTestnetMnemonic, new Toncenter('testnet', config.toncenterApiKey));
+    this.tonMainnet = new Toncenter('mainnet', config.toncenterApiKey);
+    this.tonRail = new TonRequestRail(this.tonWallet);
     this.alertRules = this.store.load().alertRules;
 
     this.session = {
@@ -289,6 +319,8 @@ export class ChainVisionEngine {
       maxSingleActionUsd: clamp(patch.maxSingleActionUsd, 10, 2000, t.maxSingleActionUsd),
       maxEvmSwapEth: clamp(patch.maxEvmSwapEth, 0.001, 0.5, t.maxEvmSwapEth),
       maxUsdcAction: clamp(patch.maxUsdcAction, 1, 1000, t.maxUsdcAction),
+      maxRequestTon: clamp(patch.maxRequestTon, 0.01, 10, t.maxRequestTon),
+      dailyRequestTon: clamp(patch.dailyRequestTon, 0.01, 50, t.dailyRequestTon),
     };
     this.broadcast({ type: 'state', state: this.getLensState(), session: this.session });
     return this.session.thresholds;
@@ -303,6 +335,12 @@ export class ChainVisionEngine {
     }
     if (!this.tickTimer) {
       this.tickTimer = setInterval(() => this.tick(), 1000);
+    }
+    void this.pollTon();
+    if (!this.tonTimer) {
+      this.tonTimer = setInterval(() => {
+        void this.pollTon();
+      }, this.config.pollIntervalMs);
     }
     this.telegram.startPolling({
       onPairCode: (code, chatId) => {
@@ -322,6 +360,10 @@ export class ChainVisionEngine {
     if (this.tickTimer) {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
+    }
+    if (this.tonTimer) {
+      clearInterval(this.tonTimer);
+      this.tonTimer = null;
     }
     this.telegram.stopPolling();
   }
@@ -502,6 +544,68 @@ export class ChainVisionEngine {
     };
   }
 
+  /**
+   * One round of TON reads, all through toncenter and all read-only: the app's test wallet (its
+   * incoming payments and a low balance become signals), the wearer's TON Connect wallet on
+   * testnet, and the optional mainnet Gram Wallet address.
+   */
+  async pollTon(now = Date.now()): Promise<TonWalletSnapshot> {
+    const snap = await this.tonWallet.read(now);
+    this.applyTonSnapshot(snap, now);
+    if (this.tonConnected) {
+      const connected = this.tonConnected;
+      const nano = await readTonBalance(this.tonWallet.api, connected.address).catch(() => null);
+      if (this.tonConnected === connected && nano !== null) connected.balanceNano = nano.toString();
+    }
+    if (this.config.tonMainnetWatchAddress) {
+      const nano = await readTonBalance(this.tonMainnet, this.config.tonMainnetWatchAddress).catch(() => null);
+      if (nano !== null) this.tonMainnetNano = nano.toString();
+    }
+    this.tick();
+    return snap;
+  }
+
+  applyTonSnapshot(snap: TonWalletSnapshot, now = Date.now()): Signal[] {
+    this.tonSnapshot = snap;
+    if (snap.error || snap.balanceNano === null) return [];
+    const balance = BigInt(snap.balanceNano);
+    const floor = parseTonAmount(this.config.tonLowBalanceTon);
+    if (floor !== null) {
+      if (balance >= floor) this.tonLowSince = null;
+      else if (this.tonPrevBalance !== null && this.tonPrevBalance >= floor && this.tonLowSince === null) this.tonLowSince = now;
+    }
+    this.tonPrevBalance = balance;
+    const signals = tonWalletSignals(snap, { lowBalanceTon: this.config.tonLowBalanceTon, lowSince: this.tonLowSince }, now);
+    this.queue.replaceSource('ton', signals);
+    return signals;
+  }
+
+  /** The wearer's wallet, connected through TON Connect in the Mini App: testnet only, read-only. */
+  async connectTonWallet(input: { address?: string; chain?: string } | null): Promise<TonConnectedWallet | null> {
+    if (!input?.address) {
+      this.tonConnected = null;
+      return null;
+    }
+    if (input.chain !== '-3') throw new Error('Connect a testnet wallet (TON Connect network -3)');
+    const parsed = parseTonAddress(input.address);
+    if (!parsed) throw new Error('Not a TON address');
+    const connected: TonConnectedWallet = { address: testnetFriendly(parsed.address), balanceNano: null, connectedAt: Date.now() };
+    this.tonConnected = connected;
+    const nano = await readTonBalance(this.tonWallet.api, connected.address).catch(() => null);
+    if (nano !== null) connected.balanceNano = nano.toString();
+    return connected;
+  }
+
+  getTonStatus() {
+    return {
+      testWallet: this.tonSnapshot,
+      connected: this.tonConnected,
+      mainnet: this.config.tonMainnetWatchAddress
+        ? { address: this.config.tonMainnetWatchAddress, balanceNano: this.tonMainnetNano, readOnly: true }
+        : null,
+    };
+  }
+
   listAlerts(): PriceAlertRule[] {
     return [...this.alertRules];
   }
@@ -568,7 +672,9 @@ export class ChainVisionEngine {
 
   /** "What matters?": up to three ranked lines from the queue, read-only, then blank again. */
   showBrief(now = Date.now()): string[] {
-    this.briefLines = this.queue.ranked(now).slice(0, BRIEF_MAX_LINES).map((s) => s.line);
+    const readOnly = tonReadOnlyBriefLine({ connectedTestnetNano: this.tonConnected?.balanceNano ?? null, mainnetNano: this.tonMainnetNano });
+    const lines = this.queue.ranked(now).slice(0, readOnly ? BRIEF_MAX_LINES - 1 : BRIEF_MAX_LINES).map((s) => s.line);
+    this.briefLines = readOnly ? [...(lines.length ? lines : [BRIEF_EMPTY_TEXT]), readOnly] : lines;
     this.setOverlay('brief', now);
     this.publish(now);
     return this.briefLines;
@@ -803,6 +909,7 @@ export class ChainVisionEngine {
   }
 
   async executeAction(action: PendingAction): Promise<ExecutionReceipt> {
+    if (action.actionType === 'ton_payout') return this.payTonRequest(action);
     const th = this.session.thresholds;
     let receipt: ExecutionReceipt;
     if (action.actionType === 'aave_repay') {
@@ -898,6 +1005,21 @@ export class ChainVisionEngine {
       };
     }
     return receipt;
+  }
+
+  /** Pay an open TON request from the app's capped test wallet; reached only through a confirmed tap. */
+  private async payTonRequest(action: PendingAction): Promise<ExecutionReceipt> {
+    const desk = this.tonRequests;
+    if (!desk) throw new Error('TON requests arrive through the Telegram money-request flow, which is not connected');
+    const th = this.session.thresholds;
+    try {
+      const paid = await this.tonRail.pay(action, desk, { perRequestTon: th.maxRequestTon, dailyTon: th.dailyRequestTon });
+      await desk.settle(paid);
+      return paid.receipt;
+    } catch (err) {
+      if (err instanceof TonTransferError) await desk.failed(action.params.requestId ?? '', err.message);
+      throw err;
+    }
   }
 
   /**
