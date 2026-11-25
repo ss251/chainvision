@@ -3,7 +3,7 @@
 **A quiet, non-custodial crypto HUD for Even Realities G2 smart glasses — built for the Heads Up Hackathon (Track 02 Crypto & DeFi + Track 03 Exchanges & Stocks + Best Telegram Integration).**
 
 > **Testnet only · Non-custodial · Not financial advice.**  
-> ChainVision runs exclusively on **Ethereum Sepolia** and **Hyperliquid / Bybit / Binance Testnets**, plus Coinbase public market data read without an account. It never holds user funds, never asks for a mainnet private key, never gives financial advice, and never executes a transaction without an explicit single-tap confirmation on the glasses.
+> ChainVision runs exclusively on **Ethereum Sepolia**, **Hyperliquid / Bybit / Binance Testnets** and **TON testnet**, plus two reads that need no account and move nothing: Coinbase public market data, and (optionally) the balance of your own TON mainnet wallet address. It never holds user funds, never asks for a mainnet private key, never gives financial advice, and never executes a transaction without an explicit single-tap confirmation on the glasses.
 
 ---
 
@@ -21,22 +21,21 @@ ChainVision stays **completely blank** (0 lit pixels on Even G2's transparent mo
    - Audio (16 kHz s16le mono PCM via `--aid` in the simulator or G2 mics) is transcribed locally via Whisper and parsed by an OpenRouter LLM into a strict Zod-validated JSON intent.
    - A single factual confirm card compares live Aave APY, Uniswap quote, and exchange data. **Tap confirms; swipe down cancels.** Nothing executes without a tap.
 3. **Telegram Bot + Mini App**
-   - **Telegram Mini App (`/miniapp`):** connects Trust Wallet on Sepolia via WalletConnect v2 (or injected Trust Wallet), pairs the glasses using a 6-digit code, and configures your thresholds and per-action caps.
-   - **Telegram Bot:** posts a verified testnet receipt (with Etherscan / Hyperliquid Testnet Explorer link) after every execution, supports `/pair <code>`, `/status`, and `/share` with an inline **Share to Group** button.
+   - **Telegram Mini App (`/miniapp`):** connects Trust Wallet on Sepolia via WalletConnect v2 (or injected Trust Wallet), pairs the glasses using a 6-digit code, configures your thresholds and per-action caps, approves money requesters, and connects a TON testnet wallet through TON Connect (read-only).
+   - **Telegram Bot:** posts a verified testnet receipt (with Etherscan / Hyperliquid Testnet Explorer link) after every execution, supports `/pair <code>`, `/status`, `/share` with an inline **Share to Group** button, and `/register` / `/ask` for money requests.
 
 4. **One Queue, One Line**
    - Every source becomes a **signal**: Aave loan health, Hyperliquid liquidation distance, Uniswap LP range, exchange-testnet liquidation distance, and price alerts you set by voice. All of them feed one priority queue; the lens shows only the top signal as one line, for example `AAVE HEALTH 1.34 (LIMIT 1.60) - TAP: REPAY 251 USDC`. Adding a source never adds a screen.
    - **Tap** approves the shown signal's fix through the same tap-confirm safety path; **swipe down** dismisses it and shows the next one, or blank if none; **hold** listens. A line left untouched blanks itself after about 10 seconds and comes back only if it still matters. With an empty queue the lens shows 0 lit characters.
    - **"What matters?"** by voice shows one read-only card with at most three ranked lines, then goes blank again. With nothing in the queue it says `NOTHING NEEDS YOU`.
    - **Alerts by voice:** *"tell me if ETH drops below 1700"* (ETH, BTC or SOL; below or above) stores a rule. When the live Hyperliquid testnet mark price crosses it, a signal is raised once and the rule is removed. Rules are listed and removable in the Mini App.
-5. **TON (Gram) through Telegram, testnet**
+
+5. **Money Requests Through Telegram (USDC on Sepolia, TON on testnet)**
+   - Someone asks through the bot and the wearer answers on the lens: `KIT ASKS 20 USDC - TAP: PAY` or `KIT ASKS 2 TON - TAP: PAY`. A tap pays from the app's capped test wallet for that currency to the requester's registered address; both people get a Telegram receipt with the Etherscan or tonviewer link. A swipe declines, and the requester is told politely. See [Telegram](#telegram-money-requests-and-the-mini-app).
+6. **TON (Gram) on testnet**
    - **The app's own TON test wallet** (v4r2, from `TON_TESTNET_MNEMONIC`, read through toncenter testnet) is watched like any other source: a payment that lands raises `RECEIVED 2 TON FROM 0QAB..WXYZ (TESTNET)` for 10 minutes, and a balance that drops below `TON_LOW_BALANCE_TON` raises `TON TEST WALLET 0.12 TON, UNDER 0.5`. Neither carries an action; a tap clears it.
-   - **A second rail for Telegram money requests:** a request in TON (`/ask 2 TON` from a known requester with a registered TON testnet address) shows `KIT ASKS 2 TON - TAP: PAY`. A tap sends testnet TON from the app's capped test wallet to that address, waits until the transfer is on chain, and posts receipts with a `testnet.tonviewer.com` link. The same rules as USDC requests apply, checked again at the moment of paying: approved requesters only, a per-request cap (default 2 TON) and a rolling 24-hour cap (default 5 TON) counted in nanotons and separately from USDC, expiry, and nothing paid without a tap. The send path can only use the testnet endpoint and refuses any address the wearer has not approved.
    - **TON Connect in the Mini App (testnet):** the wearer connects a wallet that is in testnet mode (for example Tonkeeper with testnet on). ChainVision only reads that wallet's balance; it never asks it to sign. The wallet must report TON Connect network `-3`; a mainnet wallet is refused.
    - **Read-only mainnet balance:** set `TON_MAINNET_WATCH_ADDRESS` to your real Telegram (Gram) wallet address and the brief adds one line, for example `READ-ONLY TON 3.21 TESTNET · GRAM 12.34 MAINNET`. Nothing is ever sent on mainnet: the mainnet client has no send method.
-
-5. **Money Requests Through Telegram**
-   - Someone asks through the bot and the wearer answers on the lens: `KIT ASKS 20 USDC - TAP: PAY`. A tap sends Sepolia test USDC from the app's capped test wallet to the requester's registered address; both people get a Telegram receipt with the Etherscan link. A swipe declines, and the requester is told politely.
 
 ---
 
@@ -49,7 +48,7 @@ Even G2 Glasses / evenhub-simulator (576x288 4-bit green)
        ▼
   packages/server (Node + TypeScript)
   ├─ watcher/engine.ts       — polling loop, signal queue, auto-blank tick, tap-confirm gate
-  ├─ store.ts                — JSON state file (alert rules) that survives restarts
+  ├─ store.ts                — JSON state file (alert rules, requesters, requests, payouts) that survives restarts
   ├─ safety/policy.ts        — Sepolia-only chainId, contract allowlist, per-action caps
   ├─ protocols/aave.ts       — Aave v3 Sepolia (Pool, PoolDataProvider, Faucet, WETH Gateway)
   ├─ protocols/uniswap.ts    — Uniswap v3 Sepolia (QuoterV2, SwapRouter02, PositionManager)
@@ -66,10 +65,12 @@ Even G2 Glasses / evenhub-simulator (576x288 4-bit green)
   ├─ signal.ts               — Signal model, ranking, SignalQueue (shared by server and glasses)
   ├─ alerts.ts               — price alert rules and the signal a crossed rule raises
   ├─ requests.ts             — money request rules (caps, one open request, approval) and its signal
+  ├─ exchange.ts             — exchange intents, caps and signals
+  ├─ ton.ts                  — nanoton amounts, TON request and wallet signals, the read-only brief line
   └─ lens.ts                 — pure G2 page renderer and limit validator
        ▲
        │ HTTPS / Telegram WebApp
-  packages/miniapp (Telegram Mini App: Trust Wallet WalletConnect on Sepolia + 6-digit pairing)
+  packages/miniapp (Telegram Mini App: Trust Wallet WalletConnect on Sepolia, 6-digit pairing, requesters, TON Connect on testnet)
 ```
 
 ### Even G2 Platform Compliance
@@ -96,29 +97,24 @@ Watchers re-emit what is still true on every poll; a signal a source stops emitt
 
 ---
 
-## Safety Model
+## Track 02: which listed apps ChainVision uses, and how
 
-- **Testnet-only enforcement:** `assertSepoliaOnly(11155111)` blocks all non-Sepolia EVM chain IDs; Hyperliquid L1 EIP-712 signing hardcodes `source: 'b'` (testnet) so signatures cannot replay on mainnet.
-- **Contract allowlist & caps:** EVM writes are strictly restricted to verified Sepolia Aave v3 Pool / WrappedTokenGatewayV3 / Faucet and Uniswap v3 SwapRouter02 / PositionManager, with bounded per-action USD, ETH, and USDC caps.
-- **Non-withdrawable Hyperliquid agent:** uses an authorized API agent wallet restricted to `reduceOnly: true` orders; no withdraw path exists in the codebase.
-- **Tap-to-confirm invariant:** `POST /api/actions/confirm` requires explicit `source: "glasses_tap"` confirmation of a short-lived pending action ID.
-- **Money requests:** only requesters the wearer approved once in the Mini App can ask; each request is capped (default 25 USDC), all payouts are capped per rolling 24 hours (default 50 USDC), a requester has at most one open request, and a request expires after 5 minutes. The rules are checked when asked and again at the moment of paying, and the transfer itself is blocked unless the chain is Sepolia, the token is Sepolia test USDC, and the recipient is an approved address (`assertAllowedPayout`). Nothing is paid without a tap on the glasses; the only other path is two taps by the wearer in Telegram, accepted only while the glasses are not connected.
-- **Signals never act on their own:** a signal's fix runs only when a tap confirms the action of the signal the lens is showing at that moment; a queued signal behind it cannot be confirmed.
-- **Secrets:** never committed to git; loaded from a gitignored `.env` or external mode-600 files via `CHAINVISION_ENV_FILE` / `CHAINVISION_SECRETS_FILE` (with secret fields marked non-enumerable on `AppConfig`).
-- **Aave v3 Sepolia supply cap handling:** live on-chain `getReserveCaps()` checks detect when Sepolia's testnet `USDC`/`DAI` pools have hit their supply cap (Aave Error `51`) and route voice stablecoin supply transparently to Sepolia's open-cap `EURS` reserve while borrowing/repaying live `USDC` debt against `WBTC` collateral.
+- **Hyperliquid (testnet):** live perp positions and liquidation distance feed the queue; a tap sends a `reduceOnly` IOC trim through a non-withdrawable API agent wallet.
+- **Trust Wallet (Sepolia):** the Mini App connects Trust Wallet through WalletConnect v2 to set the Sepolia address ChainVision watches. Sepolia transactions (Aave repay and supply, Uniswap swaps) are signed by the app's own Sepolia test key after a tap, not by Trust Wallet.
+- **Gram Wallet (TON) through TON Connect, testnet:** Telegram's built-in wallet runs on mainnet only and cannot sign testnet transfers, so the testnet part uses TON Connect with a testnet-capable wallet such as Tonkeeper in testnet mode. What uses which wallet:
 
-### Money requests through Telegram
+| Part | Wallet | Network | Signs? |
+| --- | --- | --- | --- |
+| Paying a `/ask 2 TON` request after a tap | The app's own TON test wallet (`TON_TESTNET_MNEMONIC`) | TON testnet | Yes, server-side, within the request caps |
+| Incoming-payment and low-balance lines | The app's own TON test wallet | TON testnet | No, read-only |
+| Balance in the brief | The wallet you connect through TON Connect | TON testnet | No, read-only |
+| Balance in the brief | Your Gram Wallet address (`TON_MAINNET_WATCH_ADDRESS`) | TON mainnet | No, read-only |
 
-How it works, with the bot `@evenchainvisionbot`:
-
-1. **The requester registers once** in a private chat with the bot: `/register 0xTheirSepoliaAddress Kit`. A private chat is required because a bot cannot message anyone who has never started it, and receipts arrive there. Changing the address later needs approval again.
-2. **The wearer approves them once** in the Mini App (Money Requests card). Approval needs proof of being the wearer: valid Telegram Mini App `initData` from the paired Telegram user, or a direct request on `127.0.0.1` that did not come through a proxy or tunnel.
-3. **The requester asks** with `/ask 20 USDC` in the private chat, or in a group the bot is in with `/ask@evenchainvisionbot 20 USDC`. Group privacy mode delivers commands addressed to the bot, while plain mentions are not delivered, so the command form is the one that works without making the bot an admin. The group gets the short replies; receipts still go to each person's private chat.
-4. **The wearer answers on the lens:** tap pays, swipe declines. The wearer's Telegram message carries **Approve here** and **Decline** buttons: Approve asks for a second confirmation (`Yes, pay 20 USDC`), and both taps are refused while the glasses are connected.
-
-Payouts use Aave's Sepolia test USDC (`0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8`, 6 decimals), which the test wallet can mint from the Aave Sepolia faucet. Set `SEPOLIA_PAYOUT_TOKEN=CIRCLE_USDC` to pay in Circle's Sepolia USDC (`0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`, from https://faucet.circle.com) instead. Per-request and daily caps are editable in the Mini App. Requesters, requests and payouts are kept in the same state file as alert rules, so the daily cap survives a restart.
-
-To see it end to end with two people: the requester opens the bot, sends `/start`, then `/register <their Sepolia address> <name>`; the wearer approves them in the Mini App; the requester sends `/ask 5 USDC`; the wearer taps PAY in the simulator or on the glasses.
+### Connecting a testnet wallet once (owner steps)
+1. Serve the Mini App on a public HTTPS URL and set it as `TELEGRAM_MINIAPP_URL`; TON Connect wallets fetch `<that URL>/tonconnect-manifest.json` from it.
+2. In Tonkeeper, switch to a testnet account (its developer menu offers testnet; the steps change between app versions).
+3. Optionally send that testnet address test coins from @testgiver_ton_bot, so the brief has a non-zero balance to show.
+4. Open the Mini App from the bot, tap **Connect Wallet** in the TON Testnet card, choose Tonkeeper and approve. The card then shows the connected address and its testnet balance; ask *"what matters?"* on the glasses to see the READ-ONLY line.
 
 ---
 
@@ -166,6 +162,38 @@ npm run verify:exchanges   # public reads live; signed transfer, trim, limit ord
 - **Binance futures and Binance transfers:** the spot testnet has no transfer endpoints and no reduce-only, and the current futures demo hosts do not resolve on the build machine's network, so ChainVision does not route around that block. Binance is used for spot limit orders and cancels only.
 - **Bybit "spot to margin":** a Unified account has only Unified (Trading) and Fund accounts, so the honest wording is Funding to Trading.
 - **Coinbase trading:** Coinbase's Advanced Trade sandbox answers with static, pre-defined responses, so a sandbox order would prove nothing; Coinbase stays read-only.
+
+
+---
+
+## Telegram: money requests and the Mini App
+
+How it works, with the bot `@evenchainvisionbot`:
+
+1. **The requester registers once** in a private chat with the bot: `/register 0xTheirSepoliaAddress Kit` for USDC, and/or `/register <their TON testnet address> Kit` for TON. A private chat is required because a bot cannot message anyone who has never started it, and receipts arrive there. Changing the address later needs approval again.
+2. **The wearer approves them once** in the Mini App (Money Requests card). Approval needs proof of being the wearer: valid Telegram Mini App `initData` from the paired Telegram user, or a direct request on `127.0.0.1` that did not come through a proxy or tunnel.
+3. **The requester asks** with `/ask 20 USDC` or `/ask 2 TON` in the private chat, or in a group the bot is in with `/ask@evenchainvisionbot 20 USDC`. Group privacy mode delivers commands addressed to the bot, while plain mentions are not delivered, so the command form is the one that works without making the bot an admin. The group gets the short replies; receipts still go to each person's private chat.
+4. **The wearer answers on the lens:** tap pays, swipe declines. The wearer's Telegram message carries **Approve here** and **Decline** buttons: Approve asks for a second confirmation (`Yes, pay 20 USDC`), and both taps are refused while the glasses are connected.
+
+Payouts use Aave's Sepolia test USDC (`0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8`, 6 decimals), which the test wallet can mint from the Aave Sepolia faucet. Set `SEPOLIA_PAYOUT_TOKEN=CIRCLE_USDC` to pay in Circle's Sepolia USDC (`0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`, from https://faucet.circle.com) instead. TON requests are paid in testnet TON from the app's own TON test wallet (`TON_TESTNET_MNEMONIC`) and have their own caps (2 TON per request, 5 TON per rolling 24 hours by default), counted separately from USDC. USDC per-request and daily caps are editable in the Mini App. Requesters, requests and payouts are kept in the same state file as alert rules, so the daily cap survives a restart.
+
+To see it end to end with two people: the requester opens the bot, sends `/start`, then `/register <their Sepolia address> <name>`; the wearer approves them in the Mini App; the requester sends `/ask 5 USDC`; the wearer taps PAY in the simulator or on the glasses.
+
+---
+
+## Safety Model
+
+- **Testnet-only enforcement:** `assertSepoliaOnly(11155111)` blocks all non-Sepolia EVM chain IDs; Hyperliquid L1 EIP-712 signing hardcodes `source: 'b'` (testnet) so signatures cannot replay on mainnet.
+- **Contract allowlist & caps:** EVM writes are strictly restricted to verified Sepolia Aave v3 Pool / WrappedTokenGatewayV3 / Faucet and Uniswap v3 SwapRouter02 / PositionManager, with bounded per-action USD, ETH, and USDC caps.
+- **Non-withdrawable Hyperliquid agent:** uses an authorized API agent wallet restricted to `reduceOnly: true` orders; no withdraw path exists in the codebase.
+- **Tap-to-confirm invariant:** `POST /api/actions/confirm` requires explicit `source: "glasses_tap"` confirmation of a short-lived pending action ID.
+- **Money requests:** only requesters the wearer approved once in the Mini App can ask; each request is capped (default 25 USDC or 2 TON), payouts are capped per rolling 24 hours per currency (default 50 USDC and 5 TON), a requester has at most one open request, and a request expires after 5 minutes. The rules are checked when asked and again at the moment of paying, and a USDC transfer is blocked unless the chain is Sepolia, the token is Sepolia test USDC, and the recipient is an approved address (`assertAllowedPayout`). Nothing is paid without a tap on the glasses; the only other path is two taps by the wearer in Telegram, accepted only while the glasses are not connected.
+- **TON payouts:** sent only through the toncenter testnet endpoint, only to a TON address the wearer approved, as a whole number of nanotons within the TON caps (`assertAllowedTonPayout`). The only mainnet call in the codebase is a balance read of `TON_MAINNET_WATCH_ADDRESS`.
+- **Signals never act on their own:** a signal's fix runs only when a tap confirms the action of the signal the lens is showing at that moment; a queued signal behind it cannot be confirmed.
+- **Secrets:** never committed to git; loaded from a gitignored `.env` or external mode-600 files via `CHAINVISION_ENV_FILE` / `CHAINVISION_SECRETS_FILE` (with secret fields marked non-enumerable on `AppConfig`).
+- **Aave v3 Sepolia supply cap handling:** live on-chain `getReserveCaps()` checks detect when Sepolia's testnet `USDC`/`DAI` pools have hit their supply cap (Aave Error `51`) and route voice stablecoin supply transparently to Sepolia's open-cap `EURS` reserve while borrowing/repaying live `USDC` debt against `WBTC` collateral.
+
+
 
 ---
 
@@ -231,28 +259,11 @@ SIM_OUT=./sim-out npm run sim:e2e
 ```
 Starts the backend on `127.0.0.1:8787` and the simulator, then walks the queue: blank with an empty queue, a voice alert set and fired, the top signal over a queued one, swipe to the next, auto-blank, the brief, the rest-and-return, and a tap clearing the last line. It saves a screenshot per step and `sim-e2e-report.json` in `SIM_OUT`. With `VERIFY_REQUESTER_ADDRESS=<Sepolia address>` it also registers and approves a requester, pays a 20 USDC request on the lens tap (a real Sepolia transfer), and declines a second one with a swipe. Telegram updates are fed to the bot's own handler through `POST /api/dev/telegram-update`, which exists only when `CHAINVISION_DEV_TELEGRAM_UPDATES=1` and only for loopback callers; the requester side uses the owner's own chat. `npm run verify:testnet` runs the same request flow with 2 USDC when `VERIFY_REQUESTER_ADDRESS` is set.
 
-Alert rules are kept in `.chainvision/state.json` (gitignored, mode 600); set `CHAINVISION_STATE_FILE` to keep them elsewhere. The glasses app reads its backend origin from `VITE_CHAINVISION_BACKEND` (default `http://127.0.0.1:8787`), which must match the `network` whitelist in `packages/glasses/app.json`.
+For the demo video, `npm run sim:demo` (same env, plus `VERIFY_REQUESTER_ADDRESS` and `VERIFY_TON_RECIPIENT`) walks the whole story in order: blank lens; an exchange line when live data raises one (it needs Bybit or Binance testnet keys, since every exchange line comes from a signed account read); a Hyperliquid trim by voice and tap; a Telegram request in USDC shown and paid; a request in TON shown, and paid only when the TON test wallet is funded; the brief; a voice alert set and fired; a voice order card with two venues' prices; blank again. It writes `sim-demo-report.json` with every step.
+
+Alert rules are kept in `.chainvision/state.json` (gitignored, mode 600); set `CHAINVISION_STATE_FILE` to keep them elsewhere. The glasses app's backend origin is one value: the first `network` whitelist entry in `packages/glasses/app.json` (`http://127.0.0.1:8787`). The glasses build reads it from there, so pointing the app at a hosted backend later means changing that one line and rebuilding.
 
 ---
-
-## Track 02: which listed apps ChainVision uses, and how
-
-- **Hyperliquid (testnet):** live perp positions and liquidation distance feed the queue; a tap sends a `reduceOnly` IOC trim through a non-withdrawable API agent wallet.
-- **Trust Wallet (Sepolia):** the Mini App connects Trust Wallet through WalletConnect v2 to set the Sepolia address ChainVision watches. Sepolia transactions (Aave repay and supply, Uniswap swaps) are signed by the app's own Sepolia test key after a tap, not by Trust Wallet.
-- **Gram Wallet (TON) through TON Connect, testnet:** Telegram's built-in wallet runs on mainnet only and cannot sign testnet transfers, so the testnet part uses TON Connect with a testnet-capable wallet such as Tonkeeper in testnet mode. What uses which wallet:
-
-| Part | Wallet | Network | Signs? |
-| --- | --- | --- | --- |
-| Paying a `/ask 2 TON` request after a tap | The app's own TON test wallet (`TON_TESTNET_MNEMONIC`) | TON testnet | Yes, server-side, within the request caps |
-| Incoming-payment and low-balance lines | The app's own TON test wallet | TON testnet | No, read-only |
-| Balance in the brief | The wallet you connect through TON Connect | TON testnet | No, read-only |
-| Balance in the brief | Your Gram Wallet address (`TON_MAINNET_WATCH_ADDRESS`) | TON mainnet | No, read-only |
-
-### Connecting a testnet wallet once (owner steps)
-1. Serve the Mini App on a public HTTPS URL and set it as `TELEGRAM_MINIAPP_URL`; TON Connect wallets fetch `<that URL>/tonconnect-manifest.json` from it.
-2. In Tonkeeper, switch to a testnet account (its developer menu offers testnet; the steps change between app versions).
-3. Optionally send that testnet address test coins from @testgiver_ton_bot, so the brief has a non-zero balance to show.
-4. Open the Mini App from the bot, tap **Connect Wallet** in the TON Testnet card, choose Tonkeeper and approve. The card then shows the connected address and its testnet balance; ask *"what matters?"* on the glasses to see the READ-ONLY line.
 
 ## What Existed Before 23 Nov
 

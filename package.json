@@ -19,6 +19,7 @@
     "verify:exchanges": "tsx scripts/verify-exchanges.ts",
     "verify:ton": "tsx scripts/verify-ton.ts",
     "sim:e2e": "node scripts/sim-e2e.mjs",
+    "sim:demo": "node scripts/sim-demo.mjs",
     "setup:sepolia": "tsx scripts/setup-sepolia-positions.ts",
     "setup:hyperliquid": "tsx scripts/setup-hyperliquid-position.ts",
     "setup:bybit": "tsx scripts/setup-bybit-position.ts",
