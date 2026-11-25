@@ -1,10 +1,71 @@
 import type { ExecutionReceipt, ProtocolSnapshots } from '@chainvision/shared';
 import type { AppConfig } from '../config.js';
 
+export interface TelegramUser {
+  id: string;
+  firstName: string;
+  username: string | null;
+}
+
+export interface CommandContext {
+  chatId: string;
+  isGroup: boolean;
+  from: TelegramUser;
+  text: string;
+  args: string[];
+}
+
+export interface BotReply {
+  text: string;
+  keyboard?: Record<string, unknown>;
+}
+
+export interface CallbackContext {
+  data: string;
+  from: TelegramUser;
+  chatId: string | null;
+  messageId: number | null;
+}
+
+export interface CallbackReply {
+  answer?: string;
+  editText?: string;
+  keyboard?: Record<string, unknown>;
+}
+
 export interface TelegramBotHandlers {
   onPairCode: (code: string, chatId: string) => { ok: boolean; message: string };
   onStatusRequest: () => Promise<ProtocolSnapshots>;
   onGetLastReceipt: () => ExecutionReceipt | null;
+  onRegister?: (ctx: CommandContext) => Promise<BotReply> | BotReply;
+  onAsk?: (ctx: CommandContext) => Promise<BotReply> | BotReply;
+  onCallback?: (ctx: CallbackContext) => Promise<CallbackReply> | CallbackReply;
+}
+
+interface TgUser {
+  id: number;
+  first_name?: string;
+  username?: string;
+}
+
+export interface TelegramUpdate {
+  update_id: number;
+  message?: {
+    message_id: number;
+    chat: { id: number; type?: string };
+    from?: TgUser;
+    text?: string;
+  };
+  callback_query?: {
+    id: string;
+    from: TgUser;
+    data?: string;
+    message?: { message_id: number; chat: { id: number } };
+  };
+}
+
+function toUser(u: TgUser | undefined, fallbackId: string): TelegramUser {
+  return { id: u ? String(u.id) : fallbackId, firstName: u?.first_name ?? '', username: u?.username ?? null };
 }
 
 export function formatReceiptText(receipt: ExecutionReceipt): string {
@@ -57,6 +118,7 @@ export class TelegramBotService {
   private polling = false;
   private offset = 0;
   private lastKnownChatId: string | null;
+  private username: string | null | undefined;
 
   constructor(config: AppConfig) {
     this.config = config;
@@ -164,69 +226,142 @@ export class TelegramBotService {
     this.polling = false;
   }
 
+  async answerCallback(callbackQueryId: string, text?: string): Promise<void> {
+    await this.api('answerCallbackQuery', { callback_query_id: callbackQueryId, ...(text ? { text } : {}) });
+  }
+
+  async editMessage(chatId: string, messageId: number, text: string, replyMarkup?: Record<string, unknown>): Promise<void> {
+    await this.api('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      disable_web_page_preview: true,
+      reply_markup: replyMarkup ?? { inline_keyboard: [] },
+    });
+  }
+
+  /** Bot username, read once with getMe; used to ignore commands addressed to other bots in groups. */
+  async resolveUsername(): Promise<string | null> {
+    if (this.username === undefined) {
+      this.username = await this.getMe()
+        .then((me) => me.username ?? null)
+        .catch(() => undefined);
+    }
+    return this.username ?? null;
+  }
+
+  /**
+   * Handle one Bot API update. Returns the ids of the messages sent in reply.
+   * In groups a command may be written /ask@thisbot; commands for other bots are ignored.
+   */
+  async handleUpdate(update: TelegramUpdate, handlers: TelegramBotHandlers): Promise<number[]> {
+    const sent: number[] = [];
+    const reply = async (chatId: string, text: string, keyboard?: Record<string, unknown>) => {
+      const res = await this.sendMessage(chatId, text, keyboard);
+      sent.push(res.message_id);
+    };
+
+    const cb = update.callback_query;
+    if (cb) {
+      const out = handlers.onCallback
+        ? await handlers.onCallback({
+            data: cb.data ?? '',
+            from: toUser(cb.from, ''),
+            chatId: cb.message ? String(cb.message.chat.id) : null,
+            messageId: cb.message?.message_id ?? null,
+          })
+        : {};
+      await this.answerCallback(cb.id, out.answer).catch(() => {});
+      if (out.editText && cb.message) {
+        await this.editMessage(String(cb.message.chat.id), cb.message.message_id, out.editText, out.keyboard);
+      }
+      return sent;
+    }
+
+    const msg = update.message;
+    if (!msg?.text) return sent;
+    const chatId = String(msg.chat.id);
+    if (!this.lastKnownChatId) this.lastKnownChatId = chatId;
+    const text = msg.text.trim();
+    const [head = '', ...args] = text.split(/\s+/);
+    const [command = '', target] = head.split('@');
+    if (target) {
+      const me = await this.resolveUsername();
+      if (me && target.toLowerCase() !== me.toLowerCase()) return sent;
+    }
+    const ctx: CommandContext = {
+      chatId,
+      isGroup: msg.chat.type === 'group' || msg.chat.type === 'supergroup',
+      from: toUser(msg.from, chatId),
+      text,
+      args,
+    };
+
+    if (command === '/start') {
+      const code = args[0];
+      if (code) {
+        const res = handlers.onPairCode(code, chatId);
+        await reply(chatId, res.message);
+      } else {
+        const keyboard =
+          this.config.telegramMiniAppUrl && !ctx.isGroup
+            ? { inline_keyboard: [[{ text: 'Open ChainVision Setup', web_app: { url: this.config.telegramMiniAppUrl } }]] }
+            : undefined;
+        await reply(
+          chatId,
+          [
+            'ChainVision G2 (Testnet Only)',
+            'Commands:',
+            '/pair <6-digit-code> — bind this chat to your glasses',
+            '/status — live Sepolia & Hyperliquid testnet snapshot',
+            '/share — format last receipt for group sharing',
+            '/register <Sepolia address> <name> — become a known requester (private chat)',
+            '/ask <amount> USDC — ask the wearer for testnet USDC (in a group: /ask@<this bot> <amount> USDC)',
+            'Not financial advice · Non-custodial',
+          ].join('\n'),
+          keyboard,
+        );
+      }
+    } else if (command === '/pair') {
+      const res = handlers.onPairCode(args[0] ?? '', chatId);
+      await reply(chatId, res.message);
+    } else if (command === '/status') {
+      const snap = await handlers.onStatusRequest();
+      await reply(chatId, formatSnapshotText(snap));
+    } else if (command === '/share') {
+      const last = handlers.onGetLastReceipt();
+      if (!last) {
+        await reply(chatId, 'No testnet execution receipt recorded yet.');
+      } else {
+        const shareText = formatShareSnippet(last);
+        await reply(chatId, shareText, {
+          inline_keyboard: [[{ text: 'Forward to Group', switch_inline_query: shareText }]],
+        });
+      }
+    } else if (command === '/register' && handlers.onRegister) {
+      const out = await handlers.onRegister(ctx);
+      await reply(chatId, out.text, out.keyboard);
+    } else if (command === '/ask' && handlers.onAsk) {
+      const out = await handlers.onAsk(ctx);
+      await reply(chatId, out.text, out.keyboard);
+    }
+    return sent;
+  }
+
   private async pollLoop(handlers: TelegramBotHandlers): Promise<void> {
+    await this.resolveUsername();
     while (this.polling) {
       try {
-        const updates = await this.api<
-          Array<{
-            update_id: number;
-            message?: { chat: { id: number }; text?: string };
-          }>
-        >('getUpdates', { offset: this.offset, timeout: 10 });
-
+        const updates = await this.api<TelegramUpdate[]>('getUpdates', {
+          offset: this.offset,
+          timeout: 10,
+          allowed_updates: ['message', 'callback_query'],
+        });
         for (const u of updates) {
           this.offset = u.update_id + 1;
-          const msg = u.message;
-          if (!msg?.text) continue;
-          const chatId = String(msg.chat.id);
-          this.lastKnownChatId = chatId;
-          const text = msg.text.trim();
-
-          if (text.startsWith('/start')) {
-            const parts = text.split(/\s+/);
-            const code = parts[1];
-            if (code) {
-              const res = handlers.onPairCode(code, chatId);
-              await this.sendMessage(chatId, res.message);
-            } else {
-              const keyboard = this.config.telegramMiniAppUrl
-                ? {
-                    inline_keyboard: [
-                      [{ text: 'Open ChainVision Setup', web_app: { url: this.config.telegramMiniAppUrl } }],
-                    ],
-                  }
-                : undefined;
-              await this.sendMessage(
-                chatId,
-                [
-                  'ChainVision G2 (Testnet Only)',
-                  'Commands:',
-                  '/pair <6-digit-code> — bind this chat to your glasses',
-                  '/status — live Sepolia & Hyperliquid testnet snapshot',
-                  '/share — format last receipt for group sharing',
-                  'Not financial advice · Non-custodial',
-                ].join('\n'),
-                keyboard,
-              );
-            }
-          } else if (text.startsWith('/pair')) {
-            const code = text.split(/\s+/)[1] ?? '';
-            const res = handlers.onPairCode(code, chatId);
-            await this.sendMessage(chatId, res.message);
-          } else if (text.startsWith('/status')) {
-            const snap = await handlers.onStatusRequest();
-            await this.sendMessage(chatId, formatSnapshotText(snap));
-          } else if (text.startsWith('/share')) {
-            const last = handlers.onGetLastReceipt();
-            if (!last) {
-              await this.sendMessage(chatId, 'No testnet execution receipt recorded yet.');
-            } else {
-              const shareText = formatShareSnippet(last);
-              await this.sendMessage(chatId, shareText, {
-                inline_keyboard: [[{ text: 'Forward to Group', switch_inline_query: shareText }]],
-              });
-            }
-          }
+          await this.handleUpdate(u, handlers).catch((err) => {
+            console.error('[ChainVision] Telegram update failed:', err instanceof Error ? err.message : String(err));
+          });
         }
       } catch {
         await new Promise((r) => setTimeout(r, 3000));
