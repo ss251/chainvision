@@ -24,6 +24,12 @@ ChainVision stays **completely blank** (0 lit pixels on Even G2's transparent mo
    - **Telegram Mini App (`/miniapp`):** connects Trust Wallet on Sepolia via WalletConnect v2 (or injected Trust Wallet), pairs the glasses using a 6-digit code, and configures your thresholds and per-action caps.
    - **Telegram Bot:** posts a verified testnet receipt (with Etherscan / Hyperliquid Testnet Explorer link) after every execution, supports `/pair <code>`, `/status`, and `/share` with an inline **Share to Group** button.
 
+4. **One Queue, One Line**
+   - Every source becomes a **signal**: Aave loan health, Hyperliquid liquidation distance, Uniswap LP range, exchange-testnet liquidation distance, and price alerts you set by voice. All of them feed one priority queue; the lens shows only the top signal as one line, for example `AAVE HEALTH 1.34 (LIMIT 1.60) - TAP: REPAY 251 USDC`. Adding a source never adds a screen.
+   - **Tap** approves the shown signal's fix through the same tap-confirm safety path; **swipe down** dismisses it and shows the next one, or blank if none; **hold** listens. A line left untouched blanks itself after about 10 seconds and comes back only if it still matters. With an empty queue the lens shows 0 lit characters.
+   - **"What matters?"** by voice shows one read-only card with at most three ranked lines, then goes blank again. With nothing in the queue it says `NOTHING NEEDS YOU`.
+   - **Alerts by voice:** *"tell me if ETH drops below 1700"* (ETH, BTC or SOL; below or above) stores a rule. When the live Hyperliquid testnet mark price crosses it, a signal is raised once and the rule is removed. Rules are listed and removable in the Mini App.
+
 ---
 
 ## Architecture
@@ -34,7 +40,8 @@ Even G2 Glasses / evenhub-simulator (576x288 4-bit green)
        │ HTTP + WebSocket (single whitelisted origin: http://127.0.0.1:8787)
        ▼
   packages/server (Node + TypeScript)
-  ├─ watcher/engine.ts       — polling loop, threshold checks, tap-confirm gate
+  ├─ watcher/engine.ts       — polling loop, signal queue, auto-blank tick, tap-confirm gate
+  ├─ store.ts                — JSON state file (alert rules) that survives restarts
   ├─ safety/policy.ts        — Sepolia-only chainId, contract allowlist, per-action caps
   ├─ protocols/aave.ts       — Aave v3 Sepolia (Pool, PoolDataProvider, Faucet, WETH Gateway)
   ├─ protocols/uniswap.ts    — Uniswap v3 Sepolia (QuoterV2, SwapRouter02, PositionManager)
@@ -42,6 +49,10 @@ Even G2 Glasses / evenhub-simulator (576x288 4-bit green)
   ├─ protocols/exchange.ts   — Bybit / Binance Futures Testnet read-only watcher
   ├─ voice/stt.ts + openrouter.ts — Whisper 16kHz PCM STT + OpenRouter strict JSON intent
   └─ telegram/bot.ts         — receipts, group sharing, /pair, /status
+  packages/shared
+  ├─ signal.ts               — Signal model, ranking, SignalQueue (shared by server and glasses)
+  ├─ alerts.ts               — price alert rules and the signal a crossed rule raises
+  └─ lens.ts                 — pure G2 page renderer and limit validator
        ▲
        │ HTTPS / Telegram WebApp
   packages/miniapp (Telegram Mini App: Trust Wallet WalletConnect on Sepolia + 6-digit pairing)
@@ -53,11 +64,21 @@ Even G2 Glasses / evenhub-simulator (576x288 4-bit green)
 - **Container & character limits:** max 3 text containers (platform limit: 12), **exactly one** `isEventCapture: 1`, `< 400` characters per page (platform limit: 1,000), zero emoji.
 - **Controls:**
   - **Double tap:** always calls `bridge.shutDownPageContainer(1)` (native exit).
-  - **Single tap:** confirms an armed alert/confirm card (1.5 s lockout prevents accidental double-tap exit) or opens positions from idle.
+  - **Single tap:** approves the shown signal's fix or a voice confirm card (1.5 s lockout prevents accidental double-tap exit); clears a signal that carries no fix, closes the brief, and opens positions from idle.
   - **Swipe up:** cycles live protocol views (`Aave -> Hyperliquid -> Uniswap -> Exchange`, 650 ms debounce).
-  - **Swipe down:** cancels pending card / snoozes alert and returns to blank idle.
+  - **Swipe down:** dismisses the shown signal for 15 minutes (unless it escalates) and shows the next one or blank; closes any other card.
   - **Hold temple (long press):** captures live 16 kHz PCM voice command (also reachable via contextual menu `Voice (4s)`).
 - **Hardware caveats (simulator-only build):** developed and verified in `evenhub-simulator@0.9.5` (which fixes `imuData = null` and right-arm touch). Physical G2 Bluetooth timing, Android background suspension, and head gestures are untested on hardware.
+
+### Signal ranking
+
+Signals are ranked money at risk soonest first (`compareSignals` in `packages/shared/src/signal.ts`, covered by `tests/signal.test.ts`):
+
+1. Severity: `critical` (past half of your threshold margin), then `warning` (threshold crossed), then `notice` (price alerts).
+2. Signals with money at risk before those without, smallest loss distance first. Loss distance is the percent move left before money is lost: liquidation distance for perps, `(1 - 1/HF)` for an Aave loan.
+3. Larger dollar exposure first, then the one expiring sooner, then the older one, then by id.
+
+Watchers re-emit what is still true on every poll; a signal a source stops emitting leaves the queue, and one not re-emitted expires. Timings: a shown line blanks after 10 s untouched and returns after a 60 s rest only if it is still raised; a swipe hides it for 15 minutes unless its severity rises; the brief blanks after 10 s.
 
 ---
 
@@ -67,6 +88,7 @@ Even G2 Glasses / evenhub-simulator (576x288 4-bit green)
 - **Contract allowlist & caps:** EVM writes are strictly restricted to verified Sepolia Aave v3 Pool / WrappedTokenGatewayV3 / Faucet and Uniswap v3 SwapRouter02 / PositionManager, with bounded per-action USD, ETH, and USDC caps.
 - **Non-withdrawable Hyperliquid agent:** uses an authorized API agent wallet restricted to `reduceOnly: true` orders; no withdraw path exists in the codebase.
 - **Tap-to-confirm invariant:** `POST /api/actions/confirm` requires explicit `source: "glasses_tap"` confirmation of a short-lived pending action ID.
+- **Signals never act on their own:** a signal's fix runs only when a tap confirms the action of the signal the lens is showing at that moment; a queued signal behind it cannot be confirmed.
 - **Secrets:** never committed to git; loaded from a gitignored `.env` or external mode-600 files via `CHAINVISION_ENV_FILE` / `CHAINVISION_SECRETS_FILE` (with secret fields marked non-enumerable on `AppConfig`).
 - **Aave v3 Sepolia supply cap handling:** live on-chain `getReserveCaps()` checks detect when Sepolia's testnet `USDC`/`DAI` pools have hit their supply cap (Aave Error `51`) and route voice stablecoin supply transparently to Sepolia's open-cap `EURS` reserve while borrowing/repaying live `USDC` debt against `WBTC` collateral.
 
@@ -116,9 +138,19 @@ npx -y @evenrealities/evenhub-simulator@0.9.5 http://127.0.0.1:5173 --automation
 # Optional: mint Aave Sepolia test tokens and open a sample Sepolia loan
 npm run setup:sepolia
 
-# Verify live reads, OpenRouter intent, real testnet txs, and Telegram receipt in ~60s
+# Verify live reads, OpenRouter intent, the signal queue, the voice brief, one voice-set
+# price alert firing on the live testnet price, real testnet txs, and a Telegram receipt
 npm run verify:testnet
 ```
+
+### 5. Simulator End-to-End Run
+```bash
+npm run build
+SIM_OUT=./sim-out npm run sim:e2e
+```
+Starts the backend on `127.0.0.1:8787` and the simulator, then walks the queue: blank with an empty queue, a voice alert set and fired, the top signal over a queued one, swipe to the next, auto-blank, the brief, the rest-and-return, and a tap clearing the last line. It saves a screenshot per step and `sim-e2e-report.json` in `SIM_OUT`.
+
+Alert rules are kept in `.chainvision/state.json` (gitignored, mode 600); set `CHAINVISION_STATE_FILE` to keep them elsewhere. The glasses app reads its backend origin from `VITE_CHAINVISION_BACKEND` (default `http://127.0.0.1:8787`), which must match the `network` whitelist in `packages/glasses/app.json`.
 
 ---
 

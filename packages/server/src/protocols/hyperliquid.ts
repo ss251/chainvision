@@ -73,6 +73,16 @@ export function computeHyperliquidActionHash(
   return keccak256(concat([actionBytes, nonceBytes, vaultMarker]));
 }
 
+function markPricesFrom(items: HlUniverseItem[], ctxs: HlAssetCtx[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const coin of ['ETH', 'BTC', 'SOL']) {
+    const idx = items.findIndex((i) => i.name === coin);
+    const px = idx >= 0 ? Number(ctxs[idx]?.markPx ?? 0) : 0;
+    if (px > 0) out[coin] = px;
+  }
+  return out;
+}
+
 export class HyperliquidTestnetClient {
   private readonly config: AppConfig;
   private universeCache: { items: HlUniverseItem[]; ctxs: HlAssetCtx[]; fetchedAt: number } | null =
@@ -109,6 +119,12 @@ export class HyperliquidTestnetClient {
     const ctxs = data[1];
     this.universeCache = { items, ctxs, fetchedAt: Date.now() };
     return { items, ctxs };
+  }
+
+  /** Testnet mark prices for the coins price alerts cover. */
+  async readMarkPrices(): Promise<Record<string, number>> {
+    const { items, ctxs } = await this.getMetaAndCtxs();
+    return markPricesFrom(items, ctxs);
   }
 
   async readSnapshot(overrideAccount?: `0x${string}`): Promise<HyperliquidSnapshot> {
@@ -185,6 +201,7 @@ export class HyperliquidTestnetClient {
         ethMarkPx,
         btcMarkPx,
         ethFundingPctHr,
+        markPrices: markPricesFrom(items, ctxs),
         positions,
       };
     } catch (err) {

@@ -1,5 +1,5 @@
 import EthereumProvider from '@walletconnect/ethereum-provider';
-import type { PairingSession, ProtocolSnapshots } from '@chainvision/shared';
+import { describeRule, type PairingSession, type PriceAlertRule, type ProtocolSnapshots } from '@chainvision/shared';
 
 declare global {
   interface Window {
@@ -177,9 +177,59 @@ document.getElementById('btn-save')?.addEventListener('click', async () => {
   }
 });
 
+const alertListEl = document.getElementById('alert-list')!;
+const alertStatusEl = document.getElementById('alert-status')!;
+
+async function loadAlerts(): Promise<void> {
+  try {
+    const data = (await fetch(`${API_BASE}/api/alerts`).then((r) => r.json())) as { rules: PriceAlertRule[] };
+    alertListEl.replaceChildren();
+    if (data.rules.length === 0) {
+      alertListEl.textContent = 'No alerts set.';
+      return;
+    }
+    for (const rule of data.rules) {
+      const row = document.createElement('div');
+      row.className = 'rule';
+      const label = document.createElement('span');
+      label.textContent = `${describeRule(rule)} (set by ${rule.createdVia}, price then ${rule.referencePrice})`;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'secondary';
+      remove.textContent = 'Remove';
+      remove.addEventListener('click', async () => {
+        await fetch(`${API_BASE}/api/alerts/remove`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: rule.id }),
+        });
+        await loadAlerts();
+      });
+      row.append(label, remove);
+      alertListEl.append(row);
+    }
+  } catch (err) {
+    alertListEl.textContent = `Alerts unavailable: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+document.getElementById('btn-alert-add')?.addEventListener('click', async () => {
+  const asset = (document.getElementById('alert-asset') as HTMLSelectElement).value;
+  const direction = (document.getElementById('alert-direction') as HTMLSelectElement).value;
+  const price = Number((document.getElementById('alert-price') as HTMLInputElement).value);
+  const data = (await fetch(`${API_BASE}/api/alerts`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ asset, direction, price }),
+  }).then((r) => r.json())) as { ok: boolean; reason?: string; rule?: PriceAlertRule };
+  alertStatusEl.textContent = data.ok && data.rule ? `Alert set: ${describeRule(data.rule)}` : (data.reason ?? 'Could not set alert');
+  await loadAlerts();
+});
+
 document.getElementById('btn-refresh')?.addEventListener('click', async () => {
   await fetch(`${API_BASE}/api/sync`, { method: 'POST' });
   await loadState();
 });
 
 void loadState();
+void loadAlerts();

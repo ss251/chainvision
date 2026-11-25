@@ -5,12 +5,21 @@
  *  2. Live OpenRouter strict JSON intent parse
  *  3. One real signed testnet transaction per protocol (Aave, Uniswap, Hyperliquid)
  *  4. One live Telegram receipt message
+ *  5. The signal queue built from live reads, the "what matters?" brief by voice,
+ *     and one voice-set price alert firing on the live Hyperliquid testnet mark price
  *
  * Writes sanitized proof JSON (ZERO secrets) to PROOF_OUT when set.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_THRESHOLDS, type ExecutionReceipt } from '@chainvision/shared';
+import {
+  DEFAULT_THRESHOLDS,
+  renderLensPage,
+  signalLensLine,
+  validateLensLayout,
+  type ExecutionReceipt,
+  type LensViewState,
+} from '@chainvision/shared';
 import { loadConfig } from '../packages/server/src/config.js';
 import { AaveSepoliaClient } from '../packages/server/src/protocols/aave.js';
 import { ExchangeTestnetWatcher } from '../packages/server/src/protocols/exchange.js';
@@ -18,6 +27,18 @@ import { HyperliquidTestnetClient } from '../packages/server/src/protocols/hyper
 import { UniswapSepoliaClient } from '../packages/server/src/protocols/uniswap.js';
 import { TelegramBotService } from '../packages/server/src/telegram/bot.js';
 import { VoiceIntentService } from '../packages/server/src/voice/openrouter.js';
+import { ChainVisionEngine } from '../packages/server/src/watcher/engine.js';
+
+function lensText(state: LensViewState): { text: string; chars: number; errors: string[] } {
+  const layout = renderLensPage(state);
+  return {
+    text: layout.textObject.map((c) => c.content).join(' | '),
+    chars: layout.totalChars,
+    errors: validateLensLayout(layout).errors,
+  };
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface CheckResult {
   name: string;
@@ -150,10 +171,106 @@ async function main() {
   });
   results.push(rVoice);
 
+  // 3. One queue, one brief, one alert (in-memory engine on live reads)
+  const engine = new ChainVisionEngine(config);
+  results.push(
+    await runCheck('queue:live-signals', async () => {
+      await engine.pollNow();
+      const now = Date.now();
+      const ranked = engine.queue.ranked(now);
+      const state = engine.getLensState(now);
+      const lens = lensText(state);
+      if (lens.errors.length) throw new Error(lens.errors.join('; '));
+      if (ranked.length === 0 && lens.chars !== 0) throw new Error('Empty queue must leave the lens blank');
+      if (ranked.length > 0 && state.signal?.id !== ranked[0]?.id) throw new Error('Lens is not showing the top signal');
+      return {
+        details: {
+          signals: ranked.map((sig) => ({
+            id: sig.id,
+            severity: sig.severity,
+            lossDistancePct: sig.lossDistancePct,
+            usdAtRisk: sig.usdAtRisk,
+            lensLine: signalLensLine(sig),
+          })),
+          lensMode: state.mode,
+          lensText: lens.text,
+          lensChars: lens.chars,
+        },
+      };
+    }),
+  );
+
+  results.push(
+    await runCheck('voice:brief-what-matters', async () => {
+      const out = await engine.handleVoiceTranscript('What matters?');
+      if (out.parse.intent.action !== 'brief') throw new Error(`Expected brief, got ${JSON.stringify(out.parse.intent)}`);
+      const state = engine.getLensState();
+      const lens = lensText(state);
+      if (state.mode !== 'brief' || lens.errors.length) throw new Error(`Brief not shown: ${lens.errors.join('; ')}`);
+      engine.dismissToBlank();
+      return {
+        status: out.parse.provider === 'openrouter' ? 'PASS' : 'SKIPPED',
+        details: {
+          provider: out.parse.provider,
+          model: out.parse.model,
+          briefLines: state.briefLines,
+          lensText: lens.text,
+          lensChars: lens.chars,
+        },
+      };
+    }),
+  );
+
+  results.push(
+    await runCheck('alert:voice-set-and-fire', async () => {
+      const prices = await engine.pollPrices();
+      const eth = prices.ETH;
+      if (!eth) throw new Error('No live ETH testnet mark price');
+      const step = Math.max(0.01, Number((eth * 0.0002).toFixed(2)));
+      const above = Number((eth + step).toFixed(2));
+      const below = Number((eth - step).toFixed(2));
+      const transcript = `tell me if ETH goes above ${above}`;
+      const voiced = await engine.handleVoiceTranscript(transcript);
+      if (!voiced.alert?.ok) throw new Error(`Voice alert not stored: ${JSON.stringify(voiced.alert ?? voiced.parse.intent)}`);
+      const twin = await engine.addAlert({ asset: 'ETH', direction: 'below', price: below }, 'api');
+      if (!twin.ok) throw new Error(`Twin alert not stored: ${twin.reason}`);
+      const rules = engine.listAlerts();
+
+      const started = Date.now();
+      const observed: number[] = [];
+      while (Date.now() - started < 300_000) {
+        await sleep(3000);
+        const live = await engine.pollPrices();
+        if (live.ETH) observed.push(live.ETH);
+        const fired = engine.queue.ranked(Date.now()).find((sig) => sig.source === 'price_alert');
+        if (!fired) continue;
+        for (const left of engine.listAlerts()) engine.removeAlert(left.id);
+        const firedRule = rules.find((r) => fired.id === `price_alert:${r.id}`);
+        return {
+          status: voiced.parse.provider === 'openrouter' ? 'PASS' : 'SKIPPED',
+          details: {
+            provider: voiced.parse.provider,
+            transcript,
+            intent: voiced.parse.intent,
+            rules: rules.map((r) => ({ id: r.id, rule: `${r.asset} ${r.direction} ${r.price}`, referencePrice: r.referencePrice, via: r.createdVia })),
+            firedRule: firedRule ? `${firedRule.asset} ${firedRule.direction} ${firedRule.price}` : fired.id,
+            priceAtFire: live.ETH,
+            secondsToFire: Math.round((Date.now() - started) / 1000),
+            observedPrices: observed,
+            signalLensLine: signalLensLine(fired),
+            priceSource: 'Hyperliquid testnet metaAndAssetCtxs markPx',
+          },
+        };
+      }
+      for (const left of engine.listAlerts()) engine.removeAlert(left.id);
+      throw new Error(`No alert fired in 300 s (ETH observed ${Math.min(...observed)}..${Math.max(...observed)}, rules ${below} / ${above})`);
+    }),
+  );
+
   let lastReceipt: ExecutionReceipt | null = null;
 
   if (!readOnly) {
-    // 3. Signed Aave v3 Sepolia transaction (repay if debt > 1 else supply 5 USDC)
+    // 4. Signed Aave v3 Sepolia transaction (repay if debt > 1 else supply 5 USDC)
     const rAaveTx = await runCheck('tx:aave-v3-sepolia', async () => {
       const snap = await aave.readSnapshot();
       if (snap.ethBalance < 0.002) {
@@ -221,7 +338,7 @@ async function main() {
     });
     results.push(rAaveTx);
 
-    // 4. Signed Uniswap v3 Sepolia swap (5 AaveUSDC -> AaveDAI on fee=500 pool)
+    // 5. Signed Uniswap v3 Sepolia swap (5 AaveUSDC -> AaveDAI on fee=500 pool)
     const rUniTx = await runCheck('tx:uniswap-v3-sepolia', async () => {
       const snap = await aave.readSnapshot();
       if (snap.ethBalance < 0.002) {
@@ -251,7 +368,7 @@ async function main() {
     });
     results.push(rUniTx);
 
-    // 5. Signed Hyperliquid Testnet reduce-only trim
+    // 6. Signed Hyperliquid Testnet reduce-only trim
     const rHlTx = await runCheck('tx:hyperliquid-testnet', async () => {
       if (!config.hyperliquidAccountAddress || !config.hyperliquidAgentPrivateKey) {
         return {
@@ -285,7 +402,7 @@ async function main() {
     });
     results.push(rHlTx);
 
-    // 6. Live Telegram receipt post
+    // 7. Live Telegram receipt post
     const rTg = await runCheck('receipt:telegram', async () => {
       if (!telegram.isConfigured) {
         return {
