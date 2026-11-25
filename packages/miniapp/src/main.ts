@@ -8,6 +8,7 @@ import {
   type ProtocolSnapshots,
   type Requester,
 } from '@chainvision/shared';
+import './ton.js';
 
 declare global {
   interface Window {

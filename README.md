@@ -29,6 +29,11 @@ ChainVision stays **completely blank** (0 lit pixels on Even G2's transparent mo
    - **Tap** approves the shown signal's fix through the same tap-confirm safety path; **swipe down** dismisses it and shows the next one, or blank if none; **hold** listens. A line left untouched blanks itself after about 10 seconds and comes back only if it still matters. With an empty queue the lens shows 0 lit characters.
    - **"What matters?"** by voice shows one read-only card with at most three ranked lines, then goes blank again. With nothing in the queue it says `NOTHING NEEDS YOU`.
    - **Alerts by voice:** *"tell me if ETH drops below 1700"* (ETH, BTC or SOL; below or above) stores a rule. When the live Hyperliquid testnet mark price crosses it, a signal is raised once and the rule is removed. Rules are listed and removable in the Mini App.
+5. **TON (Gram) through Telegram, testnet**
+   - **The app's own TON test wallet** (v4r2, from `TON_TESTNET_MNEMONIC`, read through toncenter testnet) is watched like any other source: a payment that lands raises `RECEIVED 2 TON FROM 0QAB..WXYZ (TESTNET)` for 10 minutes, and a balance that drops below `TON_LOW_BALANCE_TON` raises `TON TEST WALLET 0.12 TON, UNDER 0.5`. Neither carries an action; a tap clears it.
+   - **A second rail for Telegram money requests:** a request in TON (`/ask 2 TON` from a known requester with a registered TON testnet address) shows `KIT ASKS 2 TON - TAP: PAY`. A tap sends testnet TON from the app's capped test wallet to that address, waits until the transfer is on chain, and posts receipts with a `testnet.tonviewer.com` link. The same rules as USDC requests apply, checked again at the moment of paying: approved requesters only, a per-request cap (default 2 TON) and a rolling 24-hour cap (default 5 TON) counted in nanotons and separately from USDC, expiry, and nothing paid without a tap. The send path can only use the testnet endpoint and refuses any address the wearer has not approved.
+   - **TON Connect in the Mini App (testnet):** the wearer connects a wallet that is in testnet mode (for example Tonkeeper with testnet on). ChainVision only reads that wallet's balance; it never asks it to sign. The wallet must report TON Connect network `-3`; a mainnet wallet is refused.
+   - **Read-only mainnet balance:** set `TON_MAINNET_WATCH_ADDRESS` to your real Telegram (Gram) wallet address and the brief adds one line, for example `READ-ONLY TON 3.21 TESTNET · GRAM 12.34 MAINNET`. Nothing is ever sent on mainnet: the mainnet client has no send method.
 
 5. **Money Requests Through Telegram**
    - Someone asks through the bot and the wearer answers on the lens: `KIT ASKS 20 USDC - TAP: PAY`. A tap sends Sepolia test USDC from the app's capped test wallet to the requester's registered address; both people get a Telegram receipt with the Etherscan link. A swipe declines, and the requester is told politely.
@@ -54,7 +59,9 @@ Even G2 Glasses / evenhub-simulator (576x288 4-bit green)
   ├─ voice/stt.ts + openrouter.ts — Whisper 16kHz PCM STT + OpenRouter strict JSON intent
   ├─ telegram/bot.ts         — receipts, group sharing, /pair, /status, /register, /ask, approval buttons
   ├─ requests/book.ts        — requesters, money requests and the payout ledger
-  └─ protocols/payout.ts     — Sepolia test USDC transfer to an approved requester
+  ├─ protocols/payout.ts     — Sepolia test USDC transfer to an approved requester
+  ├─ ton/                    — TON testnet wallet (toncenter), request payout rail, address handling
+  └─ safety/ton.ts           — TON payouts: testnet endpoint only, approved addresses, nanoton caps
   packages/shared
   ├─ signal.ts               — Signal model, ranking, SignalQueue (shared by server and glasses)
   ├─ alerts.ts               — price alert rules and the signal a crossed rule raises
@@ -211,6 +218,12 @@ npm run setup:sepolia
 npm run verify:testnet
 ```
 
+### TON testnet verification
+```bash
+VERIFY_TON_RECIPIENT=<test requester's TON testnet address> npm run verify:ton
+```
+Prints the app's TON test wallet address, reads its balance live from toncenter testnet, reads `TON_MAINNET_WATCH_ADDRESS` read-only if set, renders a TON request on the lens, and checks that an over-cap request is refused before anything is sent. When the test wallet holds at least `VERIFY_TON_AMOUNT` (default 0.05) plus 0.05 TON for fees, it pays one request through the lens tap path and records the transaction hash; otherwise that step reports SKIPPED with the address that needs test coins (send it test coins from @testgiver_ton_bot in Telegram).
+
 ### 5. Simulator End-to-End Run
 ```bash
 npm run build
@@ -222,6 +235,25 @@ Alert rules are kept in `.chainvision/state.json` (gitignored, mode 600); set `C
 
 ---
 
+## Track 02: which listed apps ChainVision uses, and how
+
+- **Hyperliquid (testnet):** live perp positions and liquidation distance feed the queue; a tap sends a `reduceOnly` IOC trim through a non-withdrawable API agent wallet.
+- **Trust Wallet (Sepolia):** the Mini App connects Trust Wallet through WalletConnect v2 to set the Sepolia address ChainVision watches. Sepolia transactions (Aave repay and supply, Uniswap swaps) are signed by the app's own Sepolia test key after a tap, not by Trust Wallet.
+- **Gram Wallet (TON) through TON Connect, testnet:** Telegram's built-in wallet runs on mainnet only and cannot sign testnet transfers, so the testnet part uses TON Connect with a testnet-capable wallet such as Tonkeeper in testnet mode. What uses which wallet:
+
+| Part | Wallet | Network | Signs? |
+| --- | --- | --- | --- |
+| Paying a `/ask 2 TON` request after a tap | The app's own TON test wallet (`TON_TESTNET_MNEMONIC`) | TON testnet | Yes, server-side, within the request caps |
+| Incoming-payment and low-balance lines | The app's own TON test wallet | TON testnet | No, read-only |
+| Balance in the brief | The wallet you connect through TON Connect | TON testnet | No, read-only |
+| Balance in the brief | Your Gram Wallet address (`TON_MAINNET_WATCH_ADDRESS`) | TON mainnet | No, read-only |
+
+### Connecting a testnet wallet once (owner steps)
+1. Serve the Mini App on a public HTTPS URL and set it as `TELEGRAM_MINIAPP_URL`; TON Connect wallets fetch `<that URL>/tonconnect-manifest.json` from it.
+2. In Tonkeeper, switch to a testnet account (its developer menu offers testnet; the steps change between app versions).
+3. Optionally send that testnet address test coins from @testgiver_ton_bot, so the brief has a non-zero balance to show.
+4. Open the Mini App from the bot, tap **Connect Wallet** in the TON Testnet card, choose Tonkeeper and approve. The card then shows the connected address and its testnet balance; ask *"what matters?"* on the glasses to see the READ-ONLY line.
+
 ## What Existed Before 23 Nov
 
 **Nothing.** This repository was initialized empty on 23 Nov 2026 for the Heads Up hackathon. All ChainVision application code, protocol integrations, safety policy engine, glasses UI, Telegram bot, Mini App, and tests were written during the hackathon build window.
@@ -232,6 +264,8 @@ Alert rules are kept in `.chainvision/state.json` (gitignored, mode 600); set `C
 - `@msgpack/msgpack` — Hyperliquid L1 action encoding
 - `@walletconnect/ethereum-provider` — Trust Wallet WalletConnect v2 session in the Telegram Mini App
 - `zod` — strict JSON schema validation for OpenRouter voice intents
+- `@ton/ton`, `@ton/core`, `@ton/crypto` — TON testnet wallet (v4r2), message building and signing
+- `@tonconnect/ui` — TON Connect in the Telegram Mini App (testnet)
 - `ws`, `vite`, `typescript`, `tsx`, `vitest` — WebSocket server, bundler, TypeScript runtime, and test runner
 - `whisper.cpp` (`whisper-server` / `whisper-cli`) — local 16 kHz PCM speech-to-text
 

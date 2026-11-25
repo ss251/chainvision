@@ -268,6 +268,25 @@ export function createServer() {
         return;
       }
 
+      if (req.method === 'GET' && url.pathname === '/api/ton') {
+        sendJson(res, 200, { ok: true, ...engine.getTonStatus() });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/ton/connect') {
+        const raw = (await readBody(req)).toString('utf8');
+        const body = JSON.parse(raw || '{}') as { address?: string; chain?: string };
+        const connected = await engine.connectTonWallet(body.address ? body : null);
+        sendJson(res, 200, { ok: true, connected });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/miniapp/tonconnect-manifest.json') {
+        const base = (config.telegramMiniAppUrl ?? `${config.serverPublicUrl}/miniapp`).replace(/\/+$/, '');
+        sendJson(res, 200, { url: base, name: 'ChainVision', iconUrl: `${base}/icon-180.png` });
+        return;
+      }
+
       // Serve Telegram Mini App bundle at /miniapp
       if (req.method === 'GET' && (url.pathname === '/miniapp' || url.pathname.startsWith('/miniapp/'))) {
         const rel = url.pathname.replace(/^\/miniapp\/?/, '') || 'index.html';

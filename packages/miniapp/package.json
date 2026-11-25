@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@chainvision/shared": "0.1.0",
+    "@tonconnect/ui": "^5.0.4",
     "@walletconnect/ethereum-provider": "^2.17.3"
   },
   "devDependencies": {

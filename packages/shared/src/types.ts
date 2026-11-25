@@ -124,6 +124,10 @@ export interface UserThresholds {
   maxRequestUsdc: number;
   /** Most testnet USDC paid to requesters in any rolling 24 hours. */
   dailyRequestUsdc: number;
+  /** Largest single Telegram money request the wearer can pay in testnet TON. */
+  maxRequestTon: number;
+  /** Most testnet TON paid to requesters in any rolling 24 hours. */
+  dailyRequestTon: number;
 }
 
 export const DEFAULT_THRESHOLDS: UserThresholds = {
@@ -138,6 +142,8 @@ export const DEFAULT_THRESHOLDS: UserThresholds = {
   maxUsdcAction: 500,
   maxRequestUsdc: 25,
   dailyRequestUsdc: 50,
+  maxRequestTon: 2,
+  dailyRequestTon: 5,
 };
 
 export type ExecutableActionType =
@@ -146,12 +152,13 @@ export type ExecutableActionType =
   | 'aave_supply'
   | 'uniswap_swap'
   | 'hl_trim'
-  | 'usdc_payout';
+  | 'usdc_payout'
+  | 'ton_payout';
 
 export interface PendingAction {
   id: string;
   source: 'watcher' | 'voice' | 'telegram';
-  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'sepolia' | 'bybit' | 'binance';
+  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'sepolia' | 'bybit' | 'binance' | 'ton';
   actionType: ExecutableActionType;
   headline: string;
   factLine: string;
@@ -180,9 +187,9 @@ export interface PendingAction {
 export interface ExecutionReceipt {
   id: string;
   actionId: string;
-  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'sepolia' | 'bybit' | 'binance';
+  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'sepolia' | 'bybit' | 'binance' | 'ton';
   actionType: ExecutableActionType;
-  network: 'sepolia' | 'hyperliquid-testnet' | 'bybit-testnet' | 'binance-spot-testnet';
+  network: 'sepolia' | 'hyperliquid-testnet' | 'bybit-testnet' | 'binance-spot-testnet' | 'ton-testnet';
   summary: string;
   beforeFact: string;
   afterFact: string;
