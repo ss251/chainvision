@@ -1,3 +1,4 @@
+import type { ExchangeActionType, ExchangeDeskSnapshot } from './exchange.js';
 import type { Signal } from './signal.js';
 
 export type ProtocolName = 'aave' | 'uniswap' | 'hyperliquid' | 'exchange';
@@ -105,6 +106,8 @@ export interface ProtocolSnapshots {
   uniswap: UniswapSnapshot;
   hyperliquid: HyperliquidSnapshot;
   exchange: ExchangeSnapshot;
+  /** Bybit and Binance testnet accounts and Coinbase public prices. */
+  exchanges?: ExchangeDeskSnapshot;
 }
 
 export interface UserThresholds {
@@ -138,6 +141,7 @@ export const DEFAULT_THRESHOLDS: UserThresholds = {
 };
 
 export type ExecutableActionType =
+  | ExchangeActionType
   | 'aave_repay'
   | 'aave_supply'
   | 'uniswap_swap'
@@ -147,13 +151,17 @@ export type ExecutableActionType =
 export interface PendingAction {
   id: string;
   source: 'watcher' | 'voice' | 'telegram';
-  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'sepolia';
+  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'sepolia' | 'bybit' | 'binance';
   actionType: ExecutableActionType;
   headline: string;
   factLine: string;
   comparisonLine?: string;
   actionPrompt: string;
   params: {
+    symbol?: string;
+    side?: 'buy' | 'sell';
+    qty?: number;
+    price?: number;
     tokenIn?: string;
     tokenOut?: string;
     amount?: number;
@@ -172,9 +180,9 @@ export interface PendingAction {
 export interface ExecutionReceipt {
   id: string;
   actionId: string;
-  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'sepolia';
+  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'sepolia' | 'bybit' | 'binance';
   actionType: ExecutableActionType;
-  network: 'sepolia' | 'hyperliquid-testnet';
+  network: 'sepolia' | 'hyperliquid-testnet' | 'bybit-testnet' | 'binance-spot-testnet';
   summary: string;
   beforeFact: string;
   afterFact: string;
