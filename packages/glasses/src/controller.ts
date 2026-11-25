@@ -18,7 +18,7 @@ import {
 } from '@chainvision/shared';
 
 // The one place the backend origin is set; app.json's network whitelist must list the same origin.
-const BACKEND_ORIGIN: string = import.meta.env.VITE_CHAINVISION_BACKEND ?? 'http://127.0.0.1:8787';
+const BACKEND_ORIGIN: string = import.meta.env.VITE_CHAINVISION_BACKEND;
 const WS_URL = `${BACKEND_ORIGIN.replace(/^http/, 'ws')}/ws`;
 const STORAGE_KEY = 'chainvision_state_v1';
 const SWIPE_DEBOUNCE_MS = 650;
@@ -83,7 +83,7 @@ export class GlassesController {
       await this.renderToGlasses(this.state);
       this.onUiUpdate(this.state, this.session, 'Connected (HTTP + WS)');
     } catch {
-      this.onUiUpdate(this.state, this.session, 'Backend offline at 127.0.0.1:8787');
+      this.onUiUpdate(this.state, this.session, `Backend offline at ${BACKEND_ORIGIN}`);
     }
   }
 
