@@ -1008,8 +1008,7 @@ export class ChainVisionEngine {
   }
 
   /** Pay an open TON request from the app's capped test wallet; reached only through a confirmed tap. */
-  private async payTonRequest(action: PendingAction): Promise<ExecutionReceipt> {
-    const desk = this.tonRequests;
+  private async payTonRequest(action: PendingAction, desk = this.tonRequests): Promise<ExecutionReceipt> {
     if (!desk) throw new Error('TON requests arrive through the Telegram money-request flow, which is not connected');
     const th = this.session.thresholds;
     try {
