@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {
   REQUEST_TTL_MS,
   checkAsk,
+  checkTonAsk,
   isOpen,
   paidInLastDay,
   requesterDisplayName,
@@ -12,7 +13,9 @@ import {
   type RequestResolution,
   type RequestStatus,
   type Requester,
+  type TonCaps,
 } from '@chainvision/shared';
+import { parseTonAddress, testnetFriendly, tonAddressKey } from '../ton/address.js';
 
 export type AskResult = { ok: true; request: MoneyRequest; requester: Requester } | { ok: false; reason: string };
 
@@ -44,31 +47,37 @@ export class RequestBook {
   }
 
   approvedAddresses(): Set<string> {
-    return new Set(this.state.requesters.filter((r) => r.status === 'approved').map((r) => r.address.toLowerCase()));
+    return new Set(this.state.requesters.filter((r) => r.status === 'approved' && r.address).map((r) => (r.address as string).toLowerCase()));
   }
 
   paidLastDay(now: number): number {
     return paidInLastDay(this.state.payouts, now);
   }
 
-  /** Register or update a requester. A new address always needs the wearer's approval again. */
+  /** Register or update a requester with a Sepolia or a TON testnet address. A new address always needs the wearer's approval again. */
   register(
     user: { id: string; firstName: string; username: string | null },
     address: string,
     name: string | undefined,
     now: number,
   ): { ok: true; requester: Requester; needsApproval: boolean } | { ok: false; reason: string } {
-    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
-      return { ok: false, reason: 'Send a Sepolia address: /register 0x... <name>' };
+    const evm = /^0x[0-9a-fA-F]{40}$/.test(address) ? (address as `0x${string}`) : null;
+    const ton = evm ? null : parseTonAddress(address);
+    if (!evm && !ton) {
+      return { ok: false, reason: 'Send a Sepolia address (0x...) or a TON testnet address: /register <address> <name>' };
     }
+    const tonAddress = ton ? testnetFriendly(ton.address) : null;
     const existing = this.requester(user.id);
     const displayName = requesterDisplayName(name || user.firstName);
     if (existing) {
-      const sameAddress = existing.address.toLowerCase() === address.toLowerCase();
+      const sameAddress = evm
+        ? existing.address?.toLowerCase() === evm.toLowerCase()
+        : Boolean(existing.tonAddress) && tonAddressKey(existing.tonAddress as string) === ton?.address.toRawString();
       existing.name = displayName;
       existing.username = user.username;
       if (!sameAddress) {
-        existing.address = address as `0x${string}`;
+        if (evm) existing.address = evm;
+        else existing.tonAddress = tonAddress;
         existing.status = 'pending';
         existing.approvedAt = null;
       }
@@ -79,7 +88,8 @@ export class RequestBook {
       telegramUserId: user.id,
       name: displayName,
       username: user.username,
-      address: address as `0x${string}`,
+      address: evm,
+      tonAddress,
       status: 'pending',
       registeredAt: now,
       approvedAt: null,
@@ -116,10 +126,24 @@ export class RequestBook {
     const requester = this.requester(telegramUserId);
     const check = checkAsk({ requester, amount, requests: this.state.requests, payouts: this.state.payouts, caps, now });
     if (!check.ok) return check;
+    return this.openRequest(requester as Requester, amount, 'USDC', chat, now);
+  }
+
+  askTon(telegramUserId: string, amount: number, chat: { id: string; isGroup: boolean }, caps: TonCaps, now: number): AskResult {
+    const requester = this.requester(telegramUserId);
+    const openRequestIds = this.state.requests.filter((r) => r.requesterId === telegramUserId && isOpen(r, now)).map((r) => r.id);
+    const check = checkTonAsk({ requester, amount, openRequestIds, payouts: this.state.payouts, caps, now });
+    if (!check.ok) return check;
+    return this.openRequest(requester as Requester, amount, 'TON', chat, now);
+  }
+
+  private openRequest(requester: Requester, amount: number, currency: 'USDC' | 'TON', chat: { id: string; isGroup: boolean }, now: number): AskResult {
+    const telegramUserId = requester.telegramUserId;
     const request: MoneyRequest = {
       id: `rq_${crypto.randomBytes(4).toString('hex')}`,
       requesterId: telegramUserId,
       amount,
+      currency,
       createdAt: now,
       expiresAt: now + REQUEST_TTL_MS,
       status: 'open',
@@ -133,7 +157,7 @@ export class RequestBook {
     };
     this.state.requests.push(request);
     this.save();
-    return { ok: true, request, requester: requester as Requester };
+    return { ok: true, request, requester };
   }
 
   open(now: number): MoneyRequest[] {
@@ -169,6 +193,7 @@ export class RequestBook {
         requestId: request.id,
         requesterId: request.requesterId,
         amount: request.amount,
+        currency: request.currency ?? 'USDC',
         txHash: extra.txHash,
         at: now,
       });

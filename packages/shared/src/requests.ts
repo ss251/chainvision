@@ -1,5 +1,6 @@
 import type { RuleCheck } from './alerts.js';
 import { fitSignalLine, type Signal } from './signal.js';
+import { formatTon, parseTonAmount, tonRequestSignal } from './ton.js';
 import type { PendingAction } from './types.js';
 
 /** A Telegram money request expires if the wearer has not answered within this long. */
@@ -11,7 +12,8 @@ export interface Requester {
   telegramUserId: string;
   name: string;
   username: string | null;
-  address: `0x${string}`;
+  address: `0x${string}` | null;
+  tonAddress?: string | null;
   status: 'pending' | 'approved';
   registeredAt: number;
   approvedAt: number | null;
@@ -30,6 +32,7 @@ export interface MoneyRequest {
   id: string;
   requesterId: string;
   amount: number;
+  currency?: 'USDC' | 'TON';
   createdAt: number;
   expiresAt: number;
   status: RequestStatus;
@@ -46,6 +49,7 @@ export interface Payout {
   requestId: string;
   requesterId: string;
   amount: number;
+  currency?: 'USDC' | 'TON';
   txHash: string;
   at: number;
 }
@@ -76,7 +80,7 @@ export function parseAskAmount(text: string): number | null {
 }
 
 export function paidInLastDay(payouts: Payout[], now: number): number {
-  return payouts.filter((p) => now - p.at < DAY_MS).reduce((sum, p) => sum + p.amount, 0);
+  return payouts.filter((p) => p.currency !== 'TON' && now - p.at < DAY_MS).reduce((sum, p) => sum + p.amount, 0);
 }
 
 export function isOpen(request: MoneyRequest, now: number): boolean {
@@ -111,6 +115,7 @@ export function checkAsk(params: {
   if (requester.status !== 'approved') {
     return { ok: false, reason: 'The wearer has not approved you yet. They approve new requesters once in the ChainVision Mini App.' };
   }
+  if (!requester.address) return { ok: false, reason: 'Register a Sepolia address first: /register 0x... <name>.' };
   if (requests.some((r) => r.requesterId === requester.telegramUserId && isOpen(r, now))) {
     return { ok: false, reason: 'You already have an open request. Wait for an answer or for it to expire.' };
   }
@@ -127,7 +132,7 @@ export function checkPayout(params: {
 }): RuleCheck {
   const { request, requester, payouts, caps, now } = params;
   if (!request || !isOpen(request, now)) return { ok: false, reason: 'This request is no longer open.' };
-  if (!requester || requester.telegramUserId !== request.requesterId || requester.status !== 'approved') {
+  if (!requester || requester.telegramUserId !== request.requesterId || requester.status !== 'approved' || !requester.address) {
     return { ok: false, reason: 'The requester is no longer approved.' };
   }
   return checkAmount(request.amount, paidInLastDay(payouts, now), caps);
@@ -137,12 +142,26 @@ export function formatUsdc(amount: number): string {
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(6).replace(/0+$/, '');
 }
 
+/** "20 USDC" or "2 TON", by the request's currency. */
+export function requestAmountText(request: Pick<MoneyRequest, 'amount' | 'currency'>): string {
+  if (request.currency === 'TON') return `${formatTon(parseTonAmount(request.amount) ?? 0n)} TON`;
+  return `${formatUsdc(request.amount)} USDC`;
+}
+
+/** The lens signal for an open request in either currency, or null if the requester lacks that address. */
+export function moneyRequestSignal(request: MoneyRequest, requester: Requester, actionId: string, now: number): Signal | null {
+  if (request.currency === 'TON') {
+    return requester.tonAddress ? tonRequestSignal(request, { ...requester, tonAddress: requester.tonAddress }, actionId, now) : null;
+  }
+  return requester.address ? requestSignal(request, { ...requester, address: requester.address }, actionId, now) : null;
+}
+
 export function shortAddress(address: string): string {
   return `${address.slice(0, 6)}..${address.slice(-4)}`;
 }
 
 /** The lens line and the tap action for an open request: "KIT ASKS 20 USDC - TAP: PAY". */
-export function requestSignal(request: MoneyRequest, requester: Requester, actionId: string, now: number): Signal {
+export function requestSignal(request: MoneyRequest, requester: Requester & { address: `0x${string}` }, actionId: string, now: number): Signal {
   const amount = formatUsdc(request.amount);
   const action: PendingAction = {
     id: actionId,

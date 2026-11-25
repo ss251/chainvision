@@ -14,8 +14,10 @@ import {
   checkPayout,
   formatUsdc,
   isOpen,
+  moneyRequestSignal,
   parseAskAmount,
-  requestSignal,
+  parseTonAsk,
+  requestAmountText,
   shortAddress,
   describeRule,
   fitSignalLine,
@@ -182,8 +184,10 @@ export class ChainVisionEngine {
     const now = Date.now();
     for (const request of this.requests.open(now)) {
       const requester = this.requests.requester(request.requesterId);
-      if (requester) this.queue.upsert(requestSignal(request, requester, newActionId(), now));
+      const signal = requester ? moneyRequestSignal(request, requester, newActionId(), now) : null;
+      if (signal) this.queue.upsert(signal);
     }
+    this.tonRequests = this.tonDesk('glasses_tap');
   }
 
   subscribe(listener: (msg: WsServerMessage) => void): () => void {
@@ -279,7 +283,7 @@ export class ChainVisionEngine {
     this.getPendingAction(now);
     for (const expired of this.requests.expire(now)) {
       this.queue.remove(`request:${expired.id}`);
-      void this.tellRequester(expired, 'expired', `Your request for ${formatUsdc(expired.amount)} USDC expired before the wearer answered. No funds moved.`);
+      void this.tellRequester(expired, 'expired', `Your request for ${requestAmountText(expired)} expired before the wearer answered. No funds moved.`);
     }
     const limit = this.overlay ? OVERLAY_AUTO_BLANK_MS[this.overlay] : undefined;
     if (this.overlay && limit !== undefined && now - this.overlaySince >= limit) {
@@ -770,6 +774,8 @@ export class ChainVisionEngine {
     const res = this.requests.register(ctx.from, ctx.args[0] ?? '', ctx.args.slice(1).join(' '), Date.now());
     if (!res.ok) return { text: res.reason };
     const r = res.requester;
+    const isTon = !/^0x/i.test(ctx.args[0] ?? '');
+    const registered = (isTon ? r.tonAddress : r.address) ?? '';
     if (res.needsApproval) {
       const handle = r.username ? ` (@${r.username})` : '';
       const keyboard = this.config.telegramMiniAppUrl
@@ -777,28 +783,30 @@ export class ChainVisionEngine {
         : undefined;
       await this.notify(
         this.session.telegramChatId,
-        `New requester: ${r.name}${handle} registered ${r.address}. Approve them once in the ChainVision Mini App before their requests reach your glasses.`,
+        `New requester: ${r.name}${handle} registered ${registered}${isTon ? ' (TON testnet)' : ''}. Approve them once in the ChainVision Mini App before their requests reach your glasses.`,
         keyboard,
       );
     }
     return {
-      text: `Registered as ${r.name} with ${shortAddress(r.address)} (Sepolia). ${
+      text: `Registered as ${r.name} with ${shortAddress(registered)} (${isTon ? 'TON testnet' : 'Sepolia'}). ${
         res.needsApproval ? 'The wearer approves new requesters once; after that you can /ask.' : 'You can /ask now.'
       }`,
     };
   }
 
   async handleAsk(ctx: CommandContext): Promise<BotReply> {
+    const tonAmount = parseTonAsk(ctx.text);
+    if (tonAmount !== null) return this.handleTonAsk(ctx, tonAmount);
     const amount = parseAskAmount(ctx.text);
     if (amount === null) {
-      return { text: 'Use /ask <amount> USDC, for example /ask 20 USDC. Only Sepolia testnet USDC.' };
+      return { text: 'Use /ask <amount> USDC or /ask <amount> TON, for example /ask 20 USDC or /ask 2 TON. Testnet only.' };
     }
     if (!this.session.telegramChatId) return { text: 'No wearer is paired with this bot yet.' };
     const now = Date.now();
     const res = this.requests.ask(ctx.from.id, amount, { id: ctx.chatId, isGroup: ctx.isGroup }, this.caps(), now);
     if (!res.ok) return { text: res.reason };
     const { request, requester } = res;
-    this.queue.upsert(requestSignal(request, requester, newActionId(), now));
+    this.queue.upsert(moneyRequestSignal(request, requester, newActionId(), now) as Signal);
     this.tick(now);
     const amountText = formatUsdc(amount);
     const wearerMsg = await this.notify(
@@ -818,7 +826,38 @@ export class ChainVisionEngine {
     );
     if (wearerMsg !== null) this.requests.noteMessage(request, { role: 'wearer', kind: 'request', messageId: wearerMsg });
     return {
-      text: `Sent to the wearer: ${amountText} USDC to ${shortAddress(requester.address)}. They answer on their glasses; this request expires in 5 minutes.`,
+      text: `Sent to the wearer: ${amountText} USDC to ${shortAddress(requester.address ?? '')}. They answer on their glasses; this request expires in 5 minutes.`,
+    };
+  }
+
+  async handleTonAsk(ctx: CommandContext, amount: number): Promise<BotReply> {
+    if (!this.session.telegramChatId) return { text: 'No wearer is paired with this bot yet.' };
+    const now = Date.now();
+    const th = this.session.thresholds;
+    const res = this.requests.askTon(ctx.from.id, amount, { id: ctx.chatId, isGroup: ctx.isGroup }, { perRequestTon: th.maxRequestTon, dailyTon: th.dailyRequestTon }, now);
+    if (!res.ok) return { text: res.reason };
+    const { request, requester } = res;
+    this.queue.upsert(moneyRequestSignal(request, requester, newActionId(), now) as Signal);
+    this.tick(now);
+    const amountText = requestAmountText(request);
+    const wearerMsg = await this.notify(
+      this.session.telegramChatId,
+      [
+        `${requester.name} asks for ${amountText} (TON testnet) to ${requester.tonAddress}.`,
+        'Tap PAY on your glasses, or swipe down to decline.',
+        'If your glasses are not connected, you can approve here in two steps.',
+        'Expires in 5 minutes.',
+      ].join('\n'),
+      {
+        inline_keyboard: [
+          [{ text: 'Approve here', callback_data: `rq:approve:${request.id}` }],
+          [{ text: 'Decline', callback_data: `rq:decline:${request.id}` }],
+        ],
+      },
+    );
+    if (wearerMsg !== null) this.requests.noteMessage(request, { role: 'wearer', kind: 'request', messageId: wearerMsg });
+    return {
+      text: `Sent to the wearer: ${amountText} to ${shortAddress(requester.tonAddress ?? '')} on TON testnet. They answer on their glasses; this request expires in 5 minutes.`,
     };
   }
 
@@ -834,10 +873,11 @@ export class ChainVisionEngine {
     if (!request || !requester || !isOpen(request, Date.now())) {
       return { answer: 'No longer open', editText: 'This request is no longer open.' };
     }
-    const amountText = formatUsdc(request.amount);
+    const amountText = requestAmountText(request);
+    const ton = request.currency === 'TON';
     if (verb === 'decline') {
       await this.declineRequest(request, 'telegram_decline');
-      return { answer: 'Declined', editText: `Declined ${requester.name}'s request for ${amountText} USDC. They were told.` };
+      return { answer: 'Declined', editText: `Declined ${requester.name}'s request for ${amountText}. They were told.` };
     }
     if (this.glassesConnected) {
       return { answer: 'Your glasses are connected: tap PAY on the lens.' };
@@ -845,17 +885,17 @@ export class ChainVisionEngine {
     if (verb === 'approve') {
       return {
         answer: 'Confirm to pay',
-        editText: `Pay ${amountText} USDC to ${requester.name} (${requester.address}) on Sepolia testnet?\nSecond confirmation: this sends testnet USDC from your test wallet.`,
+        editText: `Pay ${amountText} to ${requester.name} (${ton ? requester.tonAddress : requester.address}) on ${ton ? 'TON' : 'Sepolia'} testnet?\nSecond confirmation: this sends testnet ${ton ? 'TON' : 'USDC'} from your test wallet.`,
         keyboard: {
           inline_keyboard: [
-            [{ text: `Yes, pay ${amountText} USDC`, callback_data: `rq:pay:${request.id}` }],
+            [{ text: `Yes, pay ${amountText}`, callback_data: `rq:pay:${request.id}` }],
             [{ text: 'Decline', callback_data: `rq:decline:${request.id}` }],
           ],
         },
       };
     }
     const action =
-      this.queue.get(`request:${request.id}`)?.action ?? requestSignal(request, requester, newActionId(), Date.now()).action;
+      this.queue.get(`request:${request.id}`)?.action ?? moneyRequestSignal(request, requester, newActionId(), Date.now())?.action;
     try {
       const receipt = await this.payRequest(action as PendingAction, 'telegram_confirm');
       this.lastReceipt = receipt;
@@ -873,7 +913,7 @@ export class ChainVisionEngine {
     await this.tellRequester(
       request,
       'declined',
-      `The wearer declined your request for ${formatUsdc(request.amount)} USDC this time. No funds moved.`,
+      `The wearer declined your request for ${requestAmountText(request)} this time. No funds moved.`,
     );
   }
 
@@ -882,6 +922,7 @@ export class ChainVisionEngine {
    * (glasses_tap) or, with the glasses offline, the wearer's two Telegram confirmations.
    */
   private async payRequest(action: PendingAction, via: RequestResolution): Promise<ExecutionReceipt> {
+    if (action.actionType === 'ton_payout') return this.payTonRequest(action, this.tonDesk(via));
     const id = action.params.requestId ?? '';
     const request = this.requests.request(id);
     const requester = request ? this.requests.requester(request.requesterId) : null;
@@ -895,7 +936,7 @@ export class ChainVisionEngine {
       let res: Awaited<ReturnType<SepoliaPayoutClient['transferUsdc']>>;
       try {
         res = await this.payout.transferUsdc({
-          to: requester.address,
+          to: requester.address as `0x${string}`,
           amount: request.amount,
           approvedRecipients: this.requests.approvedAddresses(),
           perRequestCapUsdc: caps.perRequestUsdc,
@@ -946,6 +987,37 @@ export class ChainVisionEngine {
     } finally {
       this.paying.delete(id);
     }
+  }
+
+  /** The request book as the TON rail reads it; outcomes are recorded and told like USDC ones. */
+  private tonDesk(via: RequestResolution): TonRequestDesk {
+    const book = this.requests;
+    return {
+      request: (id) => book.request(id),
+      requester: (id) => book.requester(id),
+      get requesters() {
+        return book.requesters;
+      },
+      get payouts() {
+        return book.payouts;
+      },
+      settle: async (paid) => {
+        const request = book.request(paid.request.id);
+        if (!request) return;
+        book.resolve(request, 'paid', via, Date.now(), { txHash: paid.transfer.txHash });
+        this.queue.remove(`request:${request.id}`);
+        await this.tellRequester(request, 'receipt', paid.requesterText, {
+          inline_keyboard: [[{ text: 'View on Explorer', url: paid.transfer.explorerUrl }]],
+        });
+      },
+      failed: async (id, message) => {
+        const request = book.request(id);
+        if (!request) return;
+        book.resolve(request, 'failed', via, Date.now(), { error: message });
+        this.queue.remove(`request:${id}`);
+        await this.tellRequester(request, 'failed', `Your request for ${requestAmountText(request)} could not be paid. No funds moved.`);
+      },
+    };
   }
 
   /** "What matters?": up to three ranked lines from the queue, read-only, then blank again. */

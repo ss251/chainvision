@@ -272,7 +272,7 @@ async function loadRequesters(): Promise<void> {
       const row = document.createElement('div');
       row.className = 'rule';
       const label = document.createElement('span');
-      label.textContent = `${r.name}${r.username ? ` @${r.username}` : ''} · ${r.address} · ${r.status}`;
+      label.textContent = `${r.name}${r.username ? ` @${r.username}` : ''} · ${[r.address, r.tonAddress].filter(Boolean).join(' · ')} · ${r.status}`;
       row.append(label);
       const actions: Array<[string, string]> = r.status === 'approved' ? [['Remove', 'remove']] : [['Approve', 'approve'], ['Remove', 'remove']];
       for (const [text, verb] of actions) {

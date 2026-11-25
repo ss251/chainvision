@@ -271,10 +271,10 @@ describe('paying a TON request', () => {
     return d;
   }
 
-  it('the engine refuses a TON payout with no request model, and an over-cap one, without sending', async () => {
+  it('the engine refuses a TON payout for a request the book does not hold, and an over-cap one, without sending', async () => {
     const engine = new ChainVisionEngine(loadConfig());
     const action = tonRequestSignal(tonRequest(), { ...kit(), tonAddress: KIT_TESTNET }, 'act_1', Date.now()).action!;
-    await expect(engine.executeAction(action)).rejects.toThrow(/money-request flow/);
+    await expect(engine.executeAction(action)).rejects.toThrow('This request is no longer open.');
     const over = tonRequest({ amount: 3, expiresAt: Date.now() + 60_000 });
     engine.tonRequests = desk(over, kit());
     const overAction = tonRequestSignal(over, { ...kit(), tonAddress: KIT_TESTNET }, 'act_2', Date.now()).action!;
