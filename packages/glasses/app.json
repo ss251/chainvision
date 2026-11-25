@@ -1,0 +1,26 @@
+{
+  "package_id": "com.chainvision.g2",
+  "edition": "202601",
+  "name": "ChainVision",
+  "version": "0.1.0",
+  "min_app_version": "2.2.10",
+  "min_sdk_version": "0.0.16",
+  "tagline": "Quiet non-custodial crypto HUD for Even G2 (testnet)",
+  "description": "Blank until a configured threshold triggers or you hold the temple to speak. Monitors Aave v3 Sepolia, Uniswap v3 Sepolia, Hyperliquid Testnet, and exchange testnet feeds with one-tap confirmation and Telegram receipts. Testnet only; not financial advice.",
+  "author": "ChainVision",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Connect to the local ChainVision backend service for live testnet data and execution",
+      "whitelist": [
+        "http://127.0.0.1:8787"
+      ]
+    },
+    {
+      "name": "g2-microphone",
+      "desc": "Capture voice commands while holding the temple touchpad"
+    }
+  ],
+  "supported_languages": ["en"]
+}
