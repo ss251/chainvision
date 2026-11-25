@@ -30,6 +30,9 @@ ChainVision stays **completely blank** (0 lit pixels on Even G2's transparent mo
    - **"What matters?"** by voice shows one read-only card with at most three ranked lines, then goes blank again. With nothing in the queue it says `NOTHING NEEDS YOU`.
    - **Alerts by voice:** *"tell me if ETH drops below 1700"* (ETH, BTC or SOL; below or above) stores a rule. When the live Hyperliquid testnet mark price crosses it, a signal is raised once and the rule is removed. Rules are listed and removable in the Mini App.
 
+5. **Money Requests Through Telegram**
+   - Someone asks through the bot and the wearer answers on the lens: `KIT ASKS 20 USDC - TAP: PAY`. A tap sends Sepolia test USDC from the app's capped test wallet to the requester's registered address; both people get a Telegram receipt with the Etherscan link. A swipe declines, and the requester is told politely.
+
 ---
 
 ## Architecture
@@ -48,10 +51,13 @@ Even G2 Glasses / evenhub-simulator (576x288 4-bit green)
   ├─ protocols/hyperliquid.ts— Hyperliquid Testnet EIP-712 ('source: b') non-withdrawable agent
   ├─ protocols/exchange.ts   — Bybit / Binance Futures Testnet read-only watcher
   ├─ voice/stt.ts + openrouter.ts — Whisper 16kHz PCM STT + OpenRouter strict JSON intent
-  └─ telegram/bot.ts         — receipts, group sharing, /pair, /status
+  ├─ telegram/bot.ts         — receipts, group sharing, /pair, /status, /register, /ask, approval buttons
+  ├─ requests/book.ts        — requesters, money requests and the payout ledger
+  └─ protocols/payout.ts     — Sepolia test USDC transfer to an approved requester
   packages/shared
   ├─ signal.ts               — Signal model, ranking, SignalQueue (shared by server and glasses)
   ├─ alerts.ts               — price alert rules and the signal a crossed rule raises
+  ├─ requests.ts             — money request rules (caps, one open request, approval) and its signal
   └─ lens.ts                 — pure G2 page renderer and limit validator
        ▲
        │ HTTPS / Telegram WebApp
@@ -88,9 +94,23 @@ Watchers re-emit what is still true on every poll; a signal a source stops emitt
 - **Contract allowlist & caps:** EVM writes are strictly restricted to verified Sepolia Aave v3 Pool / WrappedTokenGatewayV3 / Faucet and Uniswap v3 SwapRouter02 / PositionManager, with bounded per-action USD, ETH, and USDC caps.
 - **Non-withdrawable Hyperliquid agent:** uses an authorized API agent wallet restricted to `reduceOnly: true` orders; no withdraw path exists in the codebase.
 - **Tap-to-confirm invariant:** `POST /api/actions/confirm` requires explicit `source: "glasses_tap"` confirmation of a short-lived pending action ID.
+- **Money requests:** only requesters the wearer approved once in the Mini App can ask; each request is capped (default 25 USDC), all payouts are capped per rolling 24 hours (default 50 USDC), a requester has at most one open request, and a request expires after 5 minutes. The rules are checked when asked and again at the moment of paying, and the transfer itself is blocked unless the chain is Sepolia, the token is Sepolia test USDC, and the recipient is an approved address (`assertAllowedPayout`). Nothing is paid without a tap on the glasses; the only other path is two taps by the wearer in Telegram, accepted only while the glasses are not connected.
 - **Signals never act on their own:** a signal's fix runs only when a tap confirms the action of the signal the lens is showing at that moment; a queued signal behind it cannot be confirmed.
 - **Secrets:** never committed to git; loaded from a gitignored `.env` or external mode-600 files via `CHAINVISION_ENV_FILE` / `CHAINVISION_SECRETS_FILE` (with secret fields marked non-enumerable on `AppConfig`).
 - **Aave v3 Sepolia supply cap handling:** live on-chain `getReserveCaps()` checks detect when Sepolia's testnet `USDC`/`DAI` pools have hit their supply cap (Aave Error `51`) and route voice stablecoin supply transparently to Sepolia's open-cap `EURS` reserve while borrowing/repaying live `USDC` debt against `WBTC` collateral.
+
+### Money requests through Telegram
+
+How it works, with the bot `@evenchainvisionbot`:
+
+1. **The requester registers once** in a private chat with the bot: `/register 0xTheirSepoliaAddress Kit`. A private chat is required because a bot cannot message anyone who has never started it, and receipts arrive there. Changing the address later needs approval again.
+2. **The wearer approves them once** in the Mini App (Money Requests card). Approval needs proof of being the wearer: valid Telegram Mini App `initData` from the paired Telegram user, or a direct request on `127.0.0.1` that did not come through a proxy or tunnel.
+3. **The requester asks** with `/ask 20 USDC` in the private chat, or in a group the bot is in with `/ask@evenchainvisionbot 20 USDC`. Group privacy mode delivers commands addressed to the bot, while plain mentions are not delivered, so the command form is the one that works without making the bot an admin. The group gets the short replies; receipts still go to each person's private chat.
+4. **The wearer answers on the lens:** tap pays, swipe declines. The wearer's Telegram message carries **Approve here** and **Decline** buttons: Approve asks for a second confirmation (`Yes, pay 20 USDC`), and both taps are refused while the glasses are connected.
+
+Payouts use Aave's Sepolia test USDC (`0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8`, 6 decimals), which the test wallet can mint from the Aave Sepolia faucet. Set `SEPOLIA_PAYOUT_TOKEN=CIRCLE_USDC` to pay in Circle's Sepolia USDC (`0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`, from https://faucet.circle.com) instead. Per-request and daily caps are editable in the Mini App. Requesters, requests and payouts are kept in the same state file as alert rules, so the daily cap survives a restart.
+
+To see it end to end with two people: the requester opens the bot, sends `/start`, then `/register <their Sepolia address> <name>`; the wearer approves them in the Mini App; the requester sends `/ask 5 USDC`; the wearer taps PAY in the simulator or on the glasses.
 
 ---
 
@@ -148,7 +168,7 @@ npm run verify:testnet
 npm run build
 SIM_OUT=./sim-out npm run sim:e2e
 ```
-Starts the backend on `127.0.0.1:8787` and the simulator, then walks the queue: blank with an empty queue, a voice alert set and fired, the top signal over a queued one, swipe to the next, auto-blank, the brief, the rest-and-return, and a tap clearing the last line. It saves a screenshot per step and `sim-e2e-report.json` in `SIM_OUT`.
+Starts the backend on `127.0.0.1:8787` and the simulator, then walks the queue: blank with an empty queue, a voice alert set and fired, the top signal over a queued one, swipe to the next, auto-blank, the brief, the rest-and-return, and a tap clearing the last line. It saves a screenshot per step and `sim-e2e-report.json` in `SIM_OUT`. With `VERIFY_REQUESTER_ADDRESS=<Sepolia address>` it also registers and approves a requester, pays a 20 USDC request on the lens tap (a real Sepolia transfer), and declines a second one with a swipe. Telegram updates are fed to the bot's own handler through `POST /api/dev/telegram-update`, which exists only when `CHAINVISION_DEV_TELEGRAM_UPDATES=1` and only for loopback callers; the requester side uses the owner's own chat. `npm run verify:testnet` runs the same request flow with 2 USDC when `VERIFY_REQUESTER_ADDRESS` is set.
 
 Alert rules are kept in `.chainvision/state.json` (gitignored, mode 600); set `CHAINVISION_STATE_FILE` to keep them elsewhere. The glasses app reads its backend origin from `VITE_CHAINVISION_BACKEND` (default `http://127.0.0.1:8787`), which must match the `network` whitelist in `packages/glasses/app.json`.
 

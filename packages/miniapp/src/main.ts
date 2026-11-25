@@ -1,5 +1,13 @@
 import EthereumProvider from '@walletconnect/ethereum-provider';
-import { describeRule, type PairingSession, type PriceAlertRule, type ProtocolSnapshots } from '@chainvision/shared';
+import {
+  describeRule,
+  formatUsdc,
+  type MoneyRequest,
+  type PairingSession,
+  type PriceAlertRule,
+  type ProtocolSnapshots,
+  type Requester,
+} from '@chainvision/shared';
 
 declare global {
   interface Window {
@@ -7,6 +15,7 @@ declare global {
       WebApp?: {
         ready: () => void;
         expand: () => void;
+        initData?: string;
         initDataUnsafe?: { user?: { id?: number; username?: string } };
       };
     };
@@ -38,6 +47,8 @@ const thHlLiq = document.getElementById('th-hl-liq') as HTMLInputElement;
 const thHlTrim = document.getElementById('th-hl-trim') as HTMLInputElement;
 const thCapUsd = document.getElementById('th-cap-usd') as HTMLInputElement;
 const thCapEth = document.getElementById('th-cap-eth') as HTMLInputElement;
+const thReqCap = document.getElementById('th-req-cap') as HTMLInputElement;
+const thReqDaily = document.getElementById('th-req-daily') as HTMLInputElement;
 
 let walletConnectProjectId: string | null = null;
 
@@ -72,6 +83,8 @@ async function loadState(): Promise<void> {
     thHlTrim.value = String(data.session.thresholds.hlDefaultTrimPct);
     thCapUsd.value = String(data.session.thresholds.maxSingleActionUsd);
     thCapEth.value = String(data.session.thresholds.maxEvmSwapEth);
+    thReqCap.value = String(data.session.thresholds.maxRequestUsdc);
+    thReqDaily.value = String(data.session.thresholds.dailyRequestUsdc);
 
     const s = data.state.snapshots;
     if (s) {
@@ -164,6 +177,8 @@ document.getElementById('btn-save')?.addEventListener('click', async () => {
           hlDefaultTrimPct: Number(thHlTrim.value),
           maxSingleActionUsd: Number(thCapUsd.value),
           maxEvmSwapEth: Number(thCapEth.value),
+          maxRequestUsdc: Number(thReqCap.value),
+          dailyRequestUsdc: Number(thReqDaily.value),
         },
       }),
     });
@@ -226,6 +241,68 @@ document.getElementById('btn-alert-add')?.addEventListener('click', async () => 
   await loadAlerts();
 });
 
+const requesterListEl = document.getElementById('requester-list')!;
+const requestLogEl = document.getElementById('request-log')!;
+
+function wearerHeaders(json = false): Record<string, string> {
+  const headers: Record<string, string> = json ? { 'content-type': 'application/json' } : {};
+  const initData = window.Telegram?.WebApp?.initData;
+  if (initData) headers['x-telegram-init-data'] = initData;
+  return headers;
+}
+
+async function loadRequesters(): Promise<void> {
+  try {
+    const res = await fetch(`${API_BASE}/api/requesters`, { headers: wearerHeaders() });
+    const data = (await res.json()) as {
+      ok: boolean;
+      error?: string;
+      requesters?: Requester[];
+      requests?: MoneyRequest[];
+      paidLast24hUsdc?: number;
+    };
+    if (!data.ok || !data.requesters) {
+      requesterListEl.textContent = data.error ?? 'Requesters unavailable';
+      return;
+    }
+    requesterListEl.replaceChildren();
+    if (data.requesters.length === 0) requesterListEl.textContent = 'Nobody has registered yet.';
+    for (const r of data.requesters) {
+      const row = document.createElement('div');
+      row.className = 'rule';
+      const label = document.createElement('span');
+      label.textContent = `${r.name}${r.username ? ` @${r.username}` : ''} · ${r.address} · ${r.status}`;
+      row.append(label);
+      const actions: Array<[string, string]> = r.status === 'approved' ? [['Remove', 'remove']] : [['Approve', 'approve'], ['Remove', 'remove']];
+      for (const [text, verb] of actions) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = verb === 'approve' ? '' : 'secondary';
+        btn.textContent = text;
+        btn.addEventListener('click', async () => {
+          await fetch(`${API_BASE}/api/requesters/${verb}`, {
+            method: 'POST',
+            headers: wearerHeaders(true),
+            body: JSON.stringify({ telegramUserId: r.telegramUserId }),
+          });
+          await loadRequesters();
+        });
+        row.append(btn);
+      }
+      requesterListEl.append(row);
+    }
+    const names = new Map(data.requesters.map((r) => [r.telegramUserId, r.name]));
+    requestLogEl.textContent = [
+      `Paid in the last 24 h: ${formatUsdc(data.paidLast24hUsdc ?? 0)} USDC`,
+      ...(data.requests ?? []).slice(0, 5).map(
+        (q) => `${names.get(q.requesterId) ?? q.requesterId}: ${formatUsdc(q.amount)} USDC · ${q.status}${q.txHash ? ` · ${q.txHash.slice(0, 10)}..` : ''}`,
+      ),
+    ].join(' | ');
+  } catch (err) {
+    requesterListEl.textContent = `Requesters unavailable: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
 document.getElementById('btn-refresh')?.addEventListener('click', async () => {
   await fetch(`${API_BASE}/api/sync`, { method: 'POST' });
   await loadState();
@@ -233,3 +310,4 @@ document.getElementById('btn-refresh')?.addEventListener('click', async () => {
 
 void loadState();
 void loadAlerts();
+void loadRequesters();

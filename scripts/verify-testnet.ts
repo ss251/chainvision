@@ -7,6 +7,8 @@
  *  4. One live Telegram receipt message
  *  5. The signal queue built from live reads, the "what matters?" brief by voice,
  *     and one voice-set price alert firing on the live Hyperliquid testnet mark price
+ *  6. A Telegram money request paid on Sepolia after the lens tap, and one declined by a swipe
+ *     (needs VERIFY_REQUESTER_ADDRESS; the requester side uses the owner's own chat)
  *
  * Writes sanitized proof JSON (ZERO secrets) to PROOF_OUT when set.
  */
@@ -402,7 +404,71 @@ async function main() {
     });
     results.push(rHlTx);
 
-    // 7. Live Telegram receipt post
+    // 8. Telegram money request: register, wearer approval, ask, lens tap, real Sepolia USDC transfer
+    results.push(
+      await runCheck('request:telegram-sepolia-payout', async () => {
+        const requesterAddress = process.env.VERIFY_REQUESTER_ADDRESS;
+        const chatId = config.telegramChatId;
+        if (!requesterAddress || !chatId || !telegram.isConfigured || !config.sepoliaPrivateKey) {
+          return {
+            status: 'SKIPPED',
+            details: { reason: 'Needs VERIFY_REQUESTER_ADDRESS, TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN and SEPOLIA_PRIVATE_KEY' },
+          };
+        }
+        const handlers = engine.botHandlers();
+        const fromOwner = (text: string) => ({
+          update_id: Date.now(),
+          message: {
+            message_id: 1,
+            chat: { id: Number(chatId), type: 'private' },
+            from: { id: Number(chatId), first_name: 'Kit' },
+            text,
+          },
+        });
+        const registerReplies = await engine.telegram.handleUpdate(fromOwner(`/register ${requesterAddress} Kit`), handlers);
+        engine.requests.approve(chatId, Date.now());
+        const tokenBefore = await engine.payout.balance();
+        const askReplies = await engine.telegram.handleUpdate(fromOwner('/ask 2 USDC'), handlers);
+        const state = engine.getLensState();
+        const lens = lensText(state);
+        if (lens.text !== 'KIT ASKS 2 USDC - TAP: PAY' || lens.errors.length) {
+          throw new Error(`Unexpected lens: ${lens.text} ${lens.errors.join('; ')}`);
+        }
+        const receipt = await engine.confirmPendingAction(state.signal!.action!.id);
+        const paid = engine.requests.requests.find((r) => r.status === 'paid');
+
+        engine.dismissToBlank();
+        const declineAsk = await engine.telegram.handleUpdate(fromOwner('/ask 1 USDC'), handlers);
+        const declineLens = lensText(engine.getLensState()).text;
+        engine.dismissToBlank();
+        await sleep(1500);
+        const declined = engine.requests.requests.find((r) => r.status === 'declined');
+        return {
+          details: {
+            note: 'Requester and wearer are the same Telegram chat (no second account available); requester Sepolia address is a separate test address',
+            payoutToken: engine.payout.token.address,
+            requesterAddress,
+            lensLine: lens.text,
+            txHash: receipt.txHashOrOrderId,
+            explorerUrl: receipt.explorerUrl,
+            walletUsdcBefore: tokenBefore,
+            walletUsdcAfter: await engine.payout.balance(),
+            telegram: {
+              registerReplyIds: registerReplies,
+              askReplyIds: askReplies,
+              paidRequestMessages: paid?.messages ?? [],
+              declineAskReplyIds: declineAsk,
+              declineLensLine: declineLens,
+              declinedRequestMessages: declined?.messages ?? [],
+            },
+            paidStatus: paid ? `${paid.status} via ${paid.resolvedVia}` : null,
+            declinedStatus: declined ? `${declined.status} via ${declined.resolvedVia}` : null,
+          },
+        };
+      }),
+    );
+
+    // 9. Live Telegram receipt post
     const rTg = await runCheck('receipt:telegram', async () => {
       if (!telegram.isConfigured) {
         return {

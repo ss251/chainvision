@@ -4,7 +4,9 @@
  *
  * Needs: `npm run build` first, and the backend's usual env (CHAINVISION_ENV_FILE /
  * CHAINVISION_SECRETS_FILE). Optional: SIM_OUT (screenshot folder, default ./sim-out),
- * SIM_AUTOMATION_PORT (default 19900), SIM_AID (microphone id for the simulator).
+ * SIM_AUTOMATION_PORT (default 19900), SIM_AID (microphone id for the simulator),
+ * VERIFY_REQUESTER_ADDRESS (a Sepolia address; when set, a Telegram money request is paid for real
+ * after the lens tap and a second one is declined with a swipe; the requester uses the owner's chat).
  * The glasses build talks to http://127.0.0.1:8787, so the backend is started on 8787.
  */
 import { spawn } from 'node:child_process';
@@ -49,7 +51,7 @@ await new Promise((r) => staticSrv.listen(STATIC_PORT, '127.0.0.1', r));
 const stateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'chainvision-sim-')), 'state.json');
 const backend = spawn('npx', ['tsx', 'packages/server/src/index.ts'], {
   cwd: REPO,
-  env: { ...process.env, SERVER_PORT: '8787', CHAINVISION_STATE_FILE: stateFile },
+  env: { ...process.env, SERVER_PORT: '8787', CHAINVISION_STATE_FILE: stateFile, CHAINVISION_DEV_TELEGRAM_UPDATES: '1' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 children.push(backend);
@@ -182,6 +184,47 @@ await shot('p2-09-alert-returns', 'after the 60 s rest the still-live alert retu
 await input('click');
 await shot('p2-10-tap-cleared-blank', 'tap cleared the alert line');
 
+// 9. Money requests through Telegram, approved on the lens (real Sepolia transfer).
+let requests = null;
+const requesterAddress = process.env.VERIFY_REQUESTER_ADDRESS;
+const chatId = (await api('GET', '/api/state')).session.telegramChatId;
+if (requesterAddress && chatId) {
+  const tg = (text) =>
+    api('POST', '/api/dev/telegram-update', {
+      update_id: Date.now(),
+      message: { message_id: 1, chat: { id: Number(chatId), type: 'private' }, from: { id: Number(chatId), first_name: 'Kit' }, text },
+    });
+  const register = await tg(`/register ${requesterAddress} Kit`);
+  await api('POST', '/api/requesters/approve', { telegramUserId: String(chatId) });
+  const ask = await tg('/ask 20 USDC');
+  await shot('p2-11-request-on-lens', 'Telegram /ask 20 USDC from an approved requester');
+  await input('click');
+  let paid = false;
+  for (let i = 0; i < 90 && !paid; i++) {
+    await sleep(1000);
+    paid = (await api('GET', '/api/state')).state.mode === 'result';
+  }
+  await shot('p2-12-request-paid', 'tap paid 20 testnet USDC on Sepolia');
+  await input('down');
+  const ask2 = await tg('/ask 5 USDC');
+  await shot('p2-13-second-request', 'second request');
+  await input('down');
+  await sleep(1500);
+  await shot('p2-14-request-declined-blank', 'swipe down declined it');
+  const book = await api('GET', '/api/requesters');
+  requests = {
+    telegramReplyIds: { register: register.messageIds, ask: ask.messageIds, ask2: ask2.messageIds },
+    requests: book.requests.map((r) => ({
+      amount: r.amount,
+      status: r.status,
+      via: r.resolvedVia,
+      txHash: r.txHash,
+      messages: r.messages,
+    })),
+    lastReceipt: (await api('GET', '/api/state')).state.lastReceipt,
+  };
+}
+
 const consoleDump = await fetch(`${SIM}/api/console`).then((r) => r.json());
 const report = {
   timestamp: new Date().toISOString(),
@@ -189,6 +232,7 @@ const report = {
   briefIntent: brief.parse?.intent ?? null,
   alert: { transcript, intent: voiced.parse?.intent ?? null, stored: voiced.alert ?? null, twin, fired: fired.line },
   steps,
+  requests,
   consoleErrors: (consoleDump.entries || []).filter((e) => e.level === 'error'),
 };
 fs.writeFileSync(path.join(OUT_DIR, 'sim-e2e-report.json'), JSON.stringify(report, null, 2));

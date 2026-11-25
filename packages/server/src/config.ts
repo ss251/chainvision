@@ -87,6 +87,8 @@ export interface AppConfig {
   serverPublicUrl: string;
   pollIntervalMs: number;
   stateFile: string | null;
+  payoutToken: 'AAVE_USDC' | 'CIRCLE_USDC';
+  devTelegramUpdates: boolean;
 }
 
 function parseEnvFile(filePath: string): Record<string, string> {
@@ -148,6 +150,8 @@ function loadLayeredEnv(): Record<string, string> {
     'SERVER_PUBLIC_URL',
     'POLL_INTERVAL_MS',
     'CHAINVISION_STATE_FILE',
+    'SEPOLIA_PAYOUT_TOKEN',
+    'CHAINVISION_DEV_TELEGRAM_UPDATES',
   ]) {
     if (!merged[key] && process.env[key]) {
       merged[key] = process.env[key]!;
@@ -228,6 +232,8 @@ export function loadConfig(): AppConfig {
     serverPublicUrl: env.SERVER_PUBLIC_URL || `http://127.0.0.1:${env.SERVER_PORT || 8787}`,
     pollIntervalMs: Number(env.POLL_INTERVAL_MS || 15000),
     stateFile: env.CHAINVISION_STATE_FILE || null,
+    payoutToken: env.SEPOLIA_PAYOUT_TOKEN === 'CIRCLE_USDC' ? 'CIRCLE_USDC' : 'AAVE_USDC',
+    devTelegramUpdates: env.CHAINVISION_DEV_TELEGRAM_UPDATES === '1',
   };
 
   // Mark secret fields non-enumerable so JSON.stringify / logging can never leak credentials

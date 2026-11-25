@@ -152,6 +152,14 @@
           <label for="th-cap-eth">Max Swap Cap (ETH)</label>
           <input id="th-cap-eth" type="number" step="0.05" value="0.25" />
         </div>
+        <div>
+          <label for="th-req-cap">Per-Request Cap (USDC)</label>
+          <input id="th-req-cap" type="number" step="1" value="25" />
+        </div>
+        <div>
+          <label for="th-req-daily">Daily Request Cap (USDC)</label>
+          <input id="th-req-daily" type="number" step="5" value="50" />
+        </div>
       </div>
       <button id="btn-save" type="button">Pair &amp; Save Configuration</button>
       <div id="save-status" class="status"></div>
@@ -178,7 +186,14 @@
     </div>
 
     <div class="card">
-      <h2>5. Live Testnet Snapshot</h2>
+      <h2>5. Money Requests (Telegram)</h2>
+      <div class="status">People register with the bot (/register &lt;Sepolia address&gt; &lt;name&gt;) and ask with /ask 20 USDC. Approve each new requester once here; every payment still needs a tap on your glasses.</div>
+      <div id="requester-list" class="status">Loading requesters...</div>
+      <div id="request-log" class="status"></div>
+    </div>
+
+    <div class="card">
+      <h2>6. Live Testnet Snapshot</h2>
       <div id="live-snap" class="status">Loading live data...</div>
       <button id="btn-refresh" class="secondary" type="button">Refresh Live Data</button>
     </div>

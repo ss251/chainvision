@@ -4,12 +4,14 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import type { WsClientMessage } from '@chainvision/shared';
 import { loadConfig } from './config.js';
+import { isWearerRequest } from './telegram/initdata.js';
+import type { TelegramUpdate } from './telegram/bot.js';
 import { ChainVisionEngine } from './watcher/engine.js';
 
 function setCors(res: http.ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Telegram-Init-Data');
 }
 
 function sendJson(res: http.ServerResponse, status: number, payload: unknown): void {
@@ -70,6 +72,8 @@ export function createServer() {
           sepoliaAddress: config.sepoliaAddress,
           hyperliquidAgentAddress: config.hyperliquidAgentAddress,
           hyperliquidAccountConfigured: Boolean(config.hyperliquidAccountAddress),
+          glassesConnected: engine.glassesConnected,
+          payoutToken: engine.payout.token.address,
         });
         return;
       }
@@ -163,6 +167,55 @@ export function createServer() {
         return;
       }
 
+      if (url.pathname.startsWith('/api/requesters')) {
+        const wearer = isWearerRequest({
+          initData: req.headers['x-telegram-init-data'] as string | undefined,
+          botToken: config.telegramBotToken,
+          wearerChatId: engine.getSession().telegramChatId,
+          remoteAddress: req.socket.remoteAddress,
+          host: req.headers.host,
+          forwarded: Boolean(req.headers['x-forwarded-for'] || req.headers.forwarded || req.headers['x-real-ip']),
+        });
+        if (!wearer) {
+          sendJson(res, 403, { ok: false, error: 'Only the paired wearer can manage requesters' });
+          return;
+        }
+        const list = () => ({
+          requesters: engine.requests.requesters,
+          requests: engine.requests.requests.slice(-20).reverse(),
+          paidLast24hUsdc: engine.requests.paidLastDay(Date.now()),
+          caps: {
+            maxRequestUsdc: engine.getSession().thresholds.maxRequestUsdc,
+            dailyRequestUsdc: engine.getSession().thresholds.dailyRequestUsdc,
+          },
+        });
+        if (req.method === 'GET' && url.pathname === '/api/requesters') {
+          sendJson(res, 200, { ok: true, ...list() });
+          return;
+        }
+        if (req.method === 'POST' && (url.pathname === '/api/requesters/approve' || url.pathname === '/api/requesters/remove')) {
+          const raw = (await readBody(req)).toString('utf8');
+          const body = JSON.parse(raw || '{}') as { telegramUserId?: string };
+          const id = String(body.telegramUserId ?? '');
+          const ok = url.pathname.endsWith('/approve') ? Boolean(engine.requests.approve(id, Date.now())) : engine.requests.remove(id);
+          sendJson(res, ok ? 200 : 404, { ok, ...list() });
+          return;
+        }
+      }
+
+      // Simulator and verifier only: feed a Telegram update through the bot's own handler.
+      if (req.method === 'POST' && url.pathname === '/api/dev/telegram-update') {
+        const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
+        if (!config.devTelegramUpdates || !local) {
+          sendJson(res, 404, { ok: false, error: 'Not found' });
+          return;
+        }
+        const update = JSON.parse((await readBody(req)).toString('utf8') || '{}') as TelegramUpdate;
+        const messageIds = await engine.telegram.handleUpdate(update, engine.botHandlers());
+        sendJson(res, 200, { ok: true, messageIds, state: engine.getLensState() });
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/api/signals') {
         sendJson(res, 200, { ok: true, signals: engine.queue.ranked(Date.now()) });
         return;
@@ -241,6 +294,7 @@ export function createServer() {
 
   const wss = new WebSocketServer({ server, path: '/ws' });
   wss.on('connection', (ws) => {
+    let isGlasses = false;
     const unsub = engine.subscribe((msg) => {
       if (ws.readyState === ws.OPEN) {
         ws.send(JSON.stringify(msg));
@@ -250,7 +304,10 @@ export function createServer() {
     ws.on('message', async (raw) => {
       try {
         const msg = JSON.parse(raw.toString('utf8')) as WsClientMessage;
-        if (msg.type === 'tap_confirm') {
+        if (msg.type === 'register' && msg.client === 'glasses' && !isGlasses) {
+          isGlasses = true;
+          engine.setGlassesConnected(1);
+        } else if (msg.type === 'tap_confirm') {
           await engine.confirmPendingAction(msg.actionId);
         } else if (msg.type === 'dismiss') {
           engine.dismissToBlank();
@@ -271,7 +328,10 @@ export function createServer() {
       }
     });
 
-    ws.on('close', unsub);
+    ws.on('close', () => {
+      unsub();
+      if (isGlasses) engine.setGlassesConnected(-1);
+    });
   });
 
   return { server, wss, engine, config };

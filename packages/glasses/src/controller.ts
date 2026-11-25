@@ -91,6 +91,7 @@ export class GlassesController {
     try {
       this.ws = new WebSocket(WS_URL);
       this.ws.onopen = () => {
+        this.ws?.send(JSON.stringify({ type: 'register', client: 'glasses' }));
         this.onUiUpdate(this.state, this.session, 'Live WS connected');
       };
       this.ws.onmessage = (ev) => {
