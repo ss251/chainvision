@@ -1,6 +1,8 @@
 import { z } from 'zod';
+import { EXCHANGE_INTENT_PROMPT, EXCHANGE_INTENT_SCHEMAS, parseExchangeIntentLocally } from './exchange.js';
 
 export const VoiceIntentSchema = z.discriminatedUnion('action', [
+  ...EXCHANGE_INTENT_SCHEMAS,
   z.object({
     action: z.literal('aave_supply'),
     token: z.enum(['USDC', 'DAI', 'ETH', 'EURS']),
@@ -73,6 +75,7 @@ Convert the user's spoken crypto command into ONE JSON object matching one of th
    Only ETH, BTC and SOL are supported; any other asset, or no clear direction or price, is unsupported.
 8) {"action":"unsupported","reason":"<short factual reason>","confidence":1}
    Use for: withdrawals, transfers to external wallets, mainnet requests, financial advice questions, or unclear commands.
+${EXCHANGE_INTENT_PROMPT}
 
 Output ONLY valid JSON with no markdown fences and no extra text.`;
 
@@ -190,6 +193,9 @@ export function parseVoiceIntentLocally(transcript: string): VoiceIntent {
     }
     return { action: 'price_alert', asset, direction: below ? 'below' : 'above', price, confidence: 0.92 };
   }
+
+  const exchangeIntent = parseExchangeIntentLocally(lower);
+  if (exchangeIntent) return exchangeIntent;
 
   // 1. Aave repay: "repay 300 USDC", "pay back 100 DAI"
   if (/\b(repay|pay back|payback)\b/.test(lower)) {

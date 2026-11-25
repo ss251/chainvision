@@ -3,7 +3,7 @@
 **A quiet, non-custodial crypto HUD for Even Realities G2 smart glasses — built for the Heads Up Hackathon (Track 02 Crypto & DeFi + Track 03 Exchanges & Stocks + Best Telegram Integration).**
 
 > **Testnet only · Non-custodial · Not financial advice.**  
-> ChainVision runs exclusively on **Ethereum Sepolia** and **Hyperliquid / Bybit / Binance Testnets**. It never holds user funds, never asks for a mainnet private key, never gives financial advice, and never executes a transaction without an explicit single-tap confirmation on the glasses.
+> ChainVision runs exclusively on **Ethereum Sepolia** and **Hyperliquid / Bybit / Binance Testnets**, plus Coinbase public market data read without an account. It never holds user funds, never asks for a mainnet private key, never gives financial advice, and never executes a transaction without an explicit single-tap confirmation on the glasses.
 
 ---
 
@@ -15,7 +15,7 @@ ChainVision stays **completely blank** (0 lit pixels on Even G2's transparent mo
    - **Aave v3 (Sepolia):** watches your live loan health factor against your configured threshold (e.g. `1.35`). When breached, shows a single factual card (`AAVE LOAN THRESHOLD · HEALTH 1.12 · TAP: REPAY 300 USDC`). One tap executes the Sepolia repay transaction, displays the updated health factor, and posts a receipt to Telegram.
    - **Uniswap v3 (Sepolia):** monitors live WETH/USDC and USDC/DAI pool ticks, quotes via `QuoterV2`, and checks whether your `NonfungiblePositionManager` LP NFTs are in range.
    - **Hyperliquid (Testnet):** watches live perp positions and liquidation distance (`clearinghouseState`). When liquidation distance drops below your threshold, one tap sends a `reduceOnly` IOC trim via a **non-withdrawable API Agent Wallet**.
-   - **Bybit / Binance Futures (Testnet):** read-only watcher for live mark prices, funding rates, and (when read-only testnet API keys are configured) open positions and equity.
+   - **Bybit testnet, Binance spot testnet, Coinbase (read-only):** margin and liquidation signals with a one-tap Funding-to-Trading transfer or reduce-only trim on Bybit, limit orders and cancels on Binance's spot testnet by voice, and Coinbase as a second price on confirm cards. See [Track 03: Exchanges](#track-03-exchanges).
 2. **Hold-to-Speak Voice Actions (OpenRouter + Whisper)**
    - Hold the temple (`LONG_PRESS_EVENT` -> `LONG_PRESS_RELEASE_EVENT`) and say *"put 200 USDC to work"*, *"swap half my ETH to USDC"*, or *"trim half my ETH perp"*.
    - Audio (16 kHz s16le mono PCM via `--aid` in the simulator or G2 mics) is transcribed locally via Whisper and parsed by an OpenRouter LLM into a strict Zod-validated JSON intent.
@@ -46,7 +46,8 @@ Even G2 Glasses / evenhub-simulator (576x288 4-bit green)
   ├─ protocols/aave.ts       — Aave v3 Sepolia (Pool, PoolDataProvider, Faucet, WETH Gateway)
   ├─ protocols/uniswap.ts    — Uniswap v3 Sepolia (QuoterV2, SwapRouter02, PositionManager)
   ├─ protocols/hyperliquid.ts— Hyperliquid Testnet EIP-712 ('source: b') non-withdrawable agent
-  ├─ protocols/exchange.ts   — Bybit / Binance Futures Testnet read-only watcher
+  ├─ protocols/exchange.ts   — public ETH perp mark price and funding (Bybit testnet, Binance Futures testnet fallback)
+  ├─ exchanges/              — Bybit testnet and Binance spot testnet (signed reads and writes), Coinbase public prices, caps
   ├─ voice/stt.ts + openrouter.ts — Whisper 16kHz PCM STT + OpenRouter strict JSON intent
   └─ telegram/bot.ts         — receipts, group sharing, /pair, /status
   packages/shared
@@ -91,6 +92,53 @@ Watchers re-emit what is still true on every poll; a signal a source stops emitt
 - **Signals never act on their own:** a signal's fix runs only when a tap confirms the action of the signal the lens is showing at that moment; a queued signal behind it cannot be confirmed.
 - **Secrets:** never committed to git; loaded from a gitignored `.env` or external mode-600 files via `CHAINVISION_ENV_FILE` / `CHAINVISION_SECRETS_FILE` (with secret fields marked non-enumerable on `AppConfig`).
 - **Aave v3 Sepolia supply cap handling:** live on-chain `getReserveCaps()` checks detect when Sepolia's testnet `USDC`/`DAI` pools have hit their supply cap (Aave Error `51`) and route voice stablecoin supply transparently to Sepolia's open-cap `EURS` reserve while borrowing/repaying live `USDC` debt against `WBTC` collateral.
+
+---
+
+## Track 03: Exchanges
+
+ChainVision connects three of Track 03's listed apps. Each one becomes signals in the same queue and actions behind the same tap; none of them adds a screen.
+
+| App | How it is used | Reads | Writes |
+| --- | --- | --- | --- |
+| **Bybit** | Testnet, V5 API (`api-testnet.bybit.com`) | Trading (Unified) account equity, free margin and maintenance margin rate; Funding account USDT; linear perp positions with liquidation price | Internal transfer **Funding -> Trading** (USDT); **reduce-only** market order that trims a position |
+| **Binance** | Spot testnet (`testnet.binance.vision`) | Balances, open orders, fills | **Limit order** and **cancel open orders**, by voice with a confirm card |
+| **Coinbase** | Public market data only (`api.exchange.coinbase.com`) | BTC, ETH, SOL last trade in USD | **None. Coinbase is read-only:** no key, no account, no orders |
+
+**What the lens shows.** When the Bybit Trading account runs low on margin (free margin under 250 USDT or maintenance margin rate at 30% or more, with a position open) the lens shows one line in the organisers' own shape: `BYBIT MARGIN LOW - TAP: MOVE 500 USDT FUNDING TO TRADING`. A tap moves the USDT from Funding to Trading and posts a Telegram receipt with the transfer id. If Funding is empty or today's transfer cap is used, the same line offers `CLOSE 50% BTC` instead. A Bybit position within your liquidation threshold shows `BYBIT BTC LONG LIQ 6.0% AWAY - TAP: CLOSE 50% BTC`, and a tap sends a reduce-only market order. Binance testnet open orders within 0.5% of the market and recent fills appear as read-only notices, all labelled `BINANCE TESTNET`. With nothing to say, the lens stays blank.
+
+**By voice** (hold the temple), each with a confirm card and a tap:
+
+- *"move 500 to trading"*: Bybit Funding -> Trading transfer, capped and shown on the card.
+- *"close half my BTC position"*: reduce-only trim. It goes to Bybit when Bybit holds that position and Hyperliquid does not; *"close half my Bybit BTC position"* always means Bybit.
+- *"buy 0.001 BTC at 57000"*: Binance spot testnet limit order. The card shows both venues' prices on one line, for example `BINANCE TESTNET $59201 | COINBASE $59115`.
+- *"cancel my Binance orders"* or *"cancel my open BTC orders"*: cancels Binance testnet open orders.
+
+**Caps.** Every exchange write is capped per action and per rolling 24 hours, checked when the card is built and again at the tap against live balances (`EXCHANGE_CAPS` in `packages/shared/src/exchange.ts`; the day survives restarts in `.chainvision/exchange-ledger.json`, mode 600):
+
+| Action | Per action | Per 24 h |
+| --- | --- | --- |
+| Bybit Funding -> Trading | 500 USDT | 1,500 USDT |
+| Bybit reduce-only trim | $1,000 notional | $3,000 |
+| Binance limit order | $500 notional | $1,500 |
+| Binance cancel | 10 orders | 50 orders |
+
+Limit orders priced more than 25% from the testnet market are refused. Keys only ever travel to the two testnet hosts (`assertExchangeHost`), and the code has no withdrawal, no transfer out of Bybit, and no transfer from Trading to Funding.
+
+**Keys.** Put `BYBIT_TESTNET_API_KEY` / `BYBIT_TESTNET_API_SECRET` (created at testnet.bybit.com with Account Transfer and Contract Orders and Positions permissions, no withdrawal) and `BINANCE_TESTNET_API_KEY` / `BINANCE_TESTNET_API_SECRET` (from testnet.binance.vision) in your secrets file. Without them every public read still runs and the signed steps report `SKIPPED` with the reason. To see the margin line, request test coins on testnet.bybit.com, move most of the Trading balance to Funding in the Bybit testnet web app, then open a small position with `npm run setup:bybit`.
+
+```bash
+npm run setup:bybit        # opens a 0.002 BTC long on Bybit testnet if none is open
+npm run verify:exchanges   # public reads live; signed transfer, trim, limit order and cancel when keys are set
+```
+
+**Not used, and why.**
+
+- **OKX:** OKX stopped serving India in 2024 and its hosts are blocked on the build machine's network; demo trading needs an OKX login.
+- **Interactive Brokers:** paper trading needs an IBKR account and a locally running gateway; not set up for this build.
+- **Binance futures and Binance transfers:** the spot testnet has no transfer endpoints and no reduce-only, and the current futures demo hosts do not resolve on the build machine's network, so ChainVision does not route around that block. Binance is used for spot limit orders and cancels only.
+- **Bybit "spot to margin":** a Unified account has only Unified (Trading) and Fund accounts, so the honest wording is Funding to Trading.
+- **Coinbase trading:** Coinbase's Advanced Trade sandbox answers with static, pre-defined responses, so a sandbox order would prove nothing; Coinbase stays read-only.
 
 ---
 

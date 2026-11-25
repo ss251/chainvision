@@ -34,6 +34,8 @@ import {
 import type { AppConfig } from '../config.js';
 import { AaveSepoliaClient } from '../protocols/aave.js';
 import { ExchangeTestnetWatcher } from '../protocols/exchange.js';
+import { ExchangeDesk } from '../exchanges/desk.js';
+import { isExchangeActionType } from '@chainvision/shared';
 import { HyperliquidTestnetClient } from '../protocols/hyperliquid.js';
 import { UniswapSepoliaClient } from '../protocols/uniswap.js';
 import { StateStore } from '../store.js';
@@ -73,6 +75,7 @@ export class ChainVisionEngine {
   readonly uniswap: UniswapSepoliaClient;
   readonly hyperliquid: HyperliquidTestnetClient;
   readonly exchange: ExchangeTestnetWatcher;
+  readonly desk: ExchangeDesk;
   readonly stt: WhisperSttService;
   readonly intents: VoiceIntentService;
   readonly telegram: TelegramBotService;
@@ -103,6 +106,7 @@ export class ChainVisionEngine {
     this.uniswap = new UniswapSepoliaClient(config);
     this.hyperliquid = new HyperliquidTestnetClient(config);
     this.exchange = new ExchangeTestnetWatcher(config);
+    this.desk = new ExchangeDesk(config, { stateFile: options.stateFile ?? null });
     this.stt = new WhisperSttService(config);
     this.intents = new VoiceIntentService(config);
     this.telegram = new TelegramBotService(config);
@@ -328,6 +332,7 @@ export class ChainVisionEngine {
 
   async pollNow(): Promise<ProtocolSnapshots> {
     const watchAddr = (this.session.walletAddress ?? this.config.sepoliaAddress) as `0x${string}`;
+    const exchangesRead = this.desk.readSnapshot();
     const [aave, uniswap, hyperliquid, exchange] = await Promise.all([
       this.aave.readSnapshot(watchAddr),
       this.uniswap.readSnapshot(watchAddr),
@@ -341,6 +346,7 @@ export class ChainVisionEngine {
       uniswap,
       hyperliquid,
       exchange,
+      exchanges: await exchangesRead,
     };
     this.applySnapshots(this.snapshots, Date.now());
     this.tick();
@@ -474,7 +480,9 @@ export class ChainVisionEngine {
       }
     }
 
-    const exchange: Signal[] = [];
+    const exchange: Signal[] = s.exchanges
+      ? this.desk.signalSpecs(s.exchanges, th, now).map((spec) => make(spec.base, spec.action))
+      : [];
     const venue = s.exchange.venue === 'bybit-testnet' ? 'BYBIT' : 'BINANCE';
     for (const pos of s.exchange.positions) {
       if (pos.liqDistancePct === null || pos.liqDistancePct >= th.exchangeMinLiqDistancePct) continue;
@@ -617,7 +625,7 @@ export class ChainVisionEngine {
       this.errorMessage =
         parse.intent.action === 'unsupported'
           ? parse.intent.reason
-          : 'Could not prepare testnet action from voice command';
+          : (this.desk.takeRefusal() ?? 'Could not prepare testnet action from voice command');
       this.setOverlay('error');
       this.broadcast({ type: 'error', message: this.errorMessage });
       this.publish();
@@ -638,6 +646,10 @@ export class ChainVisionEngine {
   ): Promise<PendingAction | null> {
     const now = Date.now();
     const th = this.session.thresholds;
+    const exchangeAction = await this.desk.buildAction(intent, snap);
+    if (exchangeAction) {
+      return { ...exchangeAction, id: newActionId(), source: 'voice', createdAt: now, expiresAt: now + 90_000, requiresTap: true };
+    }
 
     if (intent.action === 'aave_supply') {
       const capped = Math.min(intent.amount, intent.token === 'ETH' ? th.maxEvmSwapEth : th.maxUsdcAction);
@@ -805,6 +817,7 @@ export class ChainVisionEngine {
   async executeAction(action: PendingAction): Promise<ExecutionReceipt> {
     const th = this.session.thresholds;
     let receipt: ExecutionReceipt;
+    if (isExchangeActionType(action.actionType)) return this.desk.execute(action);
     if (action.actionType === 'aave_repay') {
       const token = (action.params.tokenIn === 'DAI' ? 'DAI' : 'USDC') as 'USDC' | 'DAI';
       const amount = action.params.amount ?? th.aaveDefaultRepayUsdc;

@@ -63,7 +63,10 @@ export function hasAdviceLanguage(input: string): boolean {
 export function signalLensLine(signal: Pick<Signal, 'line' | 'action'>): string {
   if (!signal.action) return fitSignalLine(signal.line, SIGNAL_LENS_LINE_MAX);
   const fact = fitSignalLine(signal.line);
-  const prompt = fitSignalLine(signal.action.actionPrompt, SIGNAL_PROMPT_MAX);
+  const prompt = fitSignalLine(
+    signal.action.actionPrompt,
+    Math.max(SIGNAL_PROMPT_MAX, SIGNAL_LENS_LINE_MAX - fact.length - ' - TAP: '.length),
+  );
   return `${fact} - TAP: ${prompt}`.slice(0, SIGNAL_LENS_LINE_MAX);
 }
 
@@ -390,6 +393,20 @@ export function renderLensPage(state: LensViewState): LensPageLayout {
         lp
           ? `LP #${lp.tokenId}: ${lp.inRange ? 'IN RANGE' : 'OUT OF RANGE'} [${lp.tickLower},${lp.tickUpper}]`
           : `LP POSITIONS: 0  USDC/DAI: ${s.uniswap.usdcToDaiRate.toFixed(3)}`,
+      ].join('\n');
+    } else if (s.exchanges) {
+      header = 'EXCHANGES (TESTNET) · 4/4';
+      const { bybit, binance, coinbase } = s.exchanges;
+      const usdt = binance.balances.find((b) => b.asset === 'USDT');
+      const btc = binance.balances.find((b) => b.asset === 'BTC');
+      body = [
+        bybit.account
+          ? `BYBIT TRADING ${fmtUsd(bybit.account.tradingAvailableUsd)} FREE  FUNDING ${bybit.account.fundingUsdt.toFixed(0)} USDT`
+          : `BYBIT BTC ${fmtUsd(bybit.marks.BTC ?? 0)}  ACCOUNT: ${bybit.signed === 'skipped' ? 'NO KEY' : 'N/A'}`,
+        binance.signed === 'ok'
+          ? `BINANCE USDT ${(usdt?.free ?? 0).toFixed(0)}  BTC ${(btc?.free ?? 0).toFixed(4)}  ORD ${binance.openOrders.length}`
+          : `BINANCE BTC ${fmtUsd(binance.prices.BTC ?? 0)}  ACCOUNT: ${binance.signed === 'skipped' ? 'NO KEY' : 'N/A'}`,
+        `COINBASE BTC ${fmtUsd(coinbase.prices.BTC ?? 0)} (READ-ONLY)`,
       ].join('\n');
     } else {
       header = `${s.exchange.venue.toUpperCase()} · 4/4`;

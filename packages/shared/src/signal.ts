@@ -1,5 +1,6 @@
 import type { PendingAction } from './types.js';
 import { sanitizeForG2 } from './text.js';
+import type { ExchangeSignalKind } from './exchange.js';
 
 export type SignalSource = 'aave' | 'uniswap' | 'hyperliquid' | 'exchange' | 'price_alert';
 export type SignalKind = 'loan_health' | 'lp_range' | 'liquidation_distance' | 'price_cross';
@@ -27,7 +28,7 @@ export interface Signal {
   /** Stable identity of the condition, e.g. "aave:health" or "hyperliquid:liq:ETH". */
   id: string;
   source: SignalSource;
-  kind: SignalKind;
+  kind: SignalKind | ExchangeSignalKind;
   severity: SignalSeverity;
   /** The one fact the lens shows, G2-safe: at most SIGNAL_LINE_MAX characters with an action, SIGNAL_LENS_LINE_MAX without. */
   line: string;
