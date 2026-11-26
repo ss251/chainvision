@@ -1,4 +1,15 @@
 import type { LensViewState } from './types.js';
+import {
+  BRIEF_EMPTY_TEXT,
+  BRIEF_MAX_LINES,
+  SIGNAL_LENS_LINE_MAX,
+  SIGNAL_PROMPT_MAX,
+  fitSignalLine,
+  type Signal,
+} from './signal.js';
+import { hasEmoji, sanitizeForG2 } from './text.js';
+
+export { hasEmoji, sanitizeForG2 };
 
 export const G2_DISPLAY_WIDTH = 576;
 export const G2_DISPLAY_HEIGHT = 288;
@@ -44,26 +55,36 @@ const ADVICE_PATTERNS = [
   /\bbuy now\b/i,
 ];
 
-/**
- * Strips emoji and unsupported non-LVGL characters while preserving ASCII
- * plus verified G2 LVGL symbols (arrows, bullets, block bars, box lines).
- */
-export function sanitizeForG2(input: string): string {
-  // Remove Extended_Pictographic / emoji sequences
-  const noEmoji = input.replace(/\p{Extended_Pictographic}/gu, '').replace(/\uFE0F/g, '');
-  // Keep printable ASCII, newline, middle dot, arrows, block elements, box drawing
-  return noEmoji
-    .replace(/[^\x20-\x7E\n\u00B7\u2190-\u2195\u2500-\u257F\u2580-\u259F\u25A0-\u25FF]/g, '')
-    .replace(/[ \t]+/g, ' ')
-    .trim();
-}
-
-export function hasEmoji(input: string): boolean {
-  return /\p{Extended_Pictographic}/u.test(input);
-}
-
 export function hasAdviceLanguage(input: string): boolean {
   return ADVICE_PATTERNS.some((re) => re.test(input));
+}
+
+/** The single lens line for a signal: its fact, then the tap prompt when it carries an action. */
+export function signalLensLine(signal: Pick<Signal, 'line' | 'action'>): string {
+  if (!signal.action) return fitSignalLine(signal.line, SIGNAL_LENS_LINE_MAX);
+  const fact = fitSignalLine(signal.line);
+  const prompt = fitSignalLine(
+    signal.action.actionPrompt,
+    Math.max(SIGNAL_PROMPT_MAX, SIGNAL_LENS_LINE_MAX - fact.length - ' - TAP: '.length),
+  );
+  return `${fact} - TAP: ${prompt}`.slice(0, SIGNAL_LENS_LINE_MAX);
+}
+
+function singleLine(name: string, content: string): LensTextContainerSpec {
+  return {
+    containerID: 1,
+    containerName: name,
+    xPosition: 16,
+    yPosition: 112,
+    width: 544,
+    height: 64,
+    content,
+    isEventCapture: 1,
+    borderWidth: 0,
+    borderColor: 0,
+    borderRadius: 0,
+    paddingLength: 8,
+  };
 }
 
 export function renderBar(ratio: number, width = 12): string {
@@ -114,6 +135,44 @@ export function renderLensPage(state: LensViewState): LensPageLayout {
       borderRadius: 0,
       paddingLength: 0,
     });
+  } else if (state.mode === 'signal' && state.signal) {
+    containers.push(singleLine('cv_signal', signalLensLine(state.signal)));
+  } else if (state.mode === 'notice' && state.noticeText) {
+    containers.push(singleLine('cv_notice', fitSignalLine(state.noticeText, SIGNAL_LENS_LINE_MAX)));
+  } else if (state.mode === 'brief') {
+    const lines = (state.briefLines ?? []).slice(0, BRIEF_MAX_LINES);
+    containers.push(
+      {
+        containerID: 1,
+        containerName: 'cv_head',
+        xPosition: 16,
+        yPosition: 40,
+        width: 544,
+        height: 40,
+        content: 'WHAT MATTERS',
+        isEventCapture: 0,
+        borderWidth: 0,
+        borderColor: 0,
+        borderRadius: 0,
+        paddingLength: 2,
+      },
+      {
+        containerID: 2,
+        containerName: 'cv_main',
+        xPosition: 16,
+        yPosition: 88,
+        width: 544,
+        height: 140,
+        content: lines.length
+          ? lines.map((l, i) => `${i + 1} ${fitSignalLine(l, SIGNAL_LENS_LINE_MAX - 2)}`).join('\n')
+          : BRIEF_EMPTY_TEXT,
+        isEventCapture: 1,
+        borderWidth: 0,
+        borderColor: 0,
+        borderRadius: 0,
+        paddingLength: 8,
+      },
+    );
   } else if (state.mode === 'voice_listening') {
     containers.push(
       {
@@ -334,6 +393,20 @@ export function renderLensPage(state: LensViewState): LensPageLayout {
         lp
           ? `LP #${lp.tokenId}: ${lp.inRange ? 'IN RANGE' : 'OUT OF RANGE'} [${lp.tickLower},${lp.tickUpper}]`
           : `LP POSITIONS: 0  USDC/DAI: ${s.uniswap.usdcToDaiRate.toFixed(3)}`,
+      ].join('\n');
+    } else if (s.exchanges) {
+      header = 'EXCHANGES (TESTNET) · 4/4';
+      const { bybit, binance, coinbase } = s.exchanges;
+      const usdt = binance.balances.find((b) => b.asset === 'USDT');
+      const btc = binance.balances.find((b) => b.asset === 'BTC');
+      body = [
+        bybit.account
+          ? `BYBIT TRADING ${fmtUsd(bybit.account.tradingAvailableUsd)} FREE  FUNDING ${bybit.account.fundingUsdt.toFixed(0)} USDT`
+          : `BYBIT BTC ${fmtUsd(bybit.marks.BTC ?? 0)}  ACCOUNT: ${bybit.signed === 'skipped' ? 'NO KEY' : 'N/A'}`,
+        binance.signed === 'ok'
+          ? `BINANCE USDT ${(usdt?.free ?? 0).toFixed(0)}  BTC ${(btc?.free ?? 0).toFixed(4)}  ORD ${binance.openOrders.length}`
+          : `BINANCE BTC ${fmtUsd(binance.prices.BTC ?? 0)}  ACCOUNT: ${binance.signed === 'skipped' ? 'NO KEY' : 'N/A'}`,
+        `COINBASE BTC ${fmtUsd(coinbase.prices.BTC ?? 0)} (READ-ONLY)`,
       ].join('\n');
     } else {
       header = `${s.exchange.venue.toUpperCase()} · 4/4`;

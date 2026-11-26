@@ -16,8 +16,13 @@
     "test": "vitest run",
     "typecheck": "npm --workspace @chainvision/shared run typecheck && npm --workspace @chainvision/server run typecheck && npm --workspace @chainvision/glasses run typecheck && npm --workspace @chainvision/miniapp run typecheck",
     "verify:testnet": "tsx scripts/verify-testnet.ts",
+    "verify:exchanges": "tsx scripts/verify-exchanges.ts",
+    "verify:ton": "tsx scripts/verify-ton.ts",
+    "sim:e2e": "node scripts/sim-e2e.mjs",
+    "sim:demo": "node scripts/sim-demo.mjs",
     "setup:sepolia": "tsx scripts/setup-sepolia-positions.ts",
     "setup:hyperliquid": "tsx scripts/setup-hyperliquid-position.ts",
+    "setup:bybit": "tsx scripts/setup-bybit-position.ts",
     "sim": "npx -y @evenrealities/evenhub-simulator@0.9.5 http://127.0.0.1:5173 --automation-port 9898"
   },
   "devDependencies": {

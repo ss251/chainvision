@@ -1,3 +1,6 @@
+import type { ExchangeActionType, ExchangeDeskSnapshot } from './exchange.js';
+import type { Signal } from './signal.js';
+
 export type ProtocolName = 'aave' | 'uniswap' | 'hyperliquid' | 'exchange';
 
 export interface AaveReserveRate {
@@ -71,6 +74,8 @@ export interface HyperliquidSnapshot {
   ethMarkPx: number;
   btcMarkPx: number;
   ethFundingPctHr: number;
+  /** Testnet mark prices by coin (ETH, BTC, SOL when listed). */
+  markPrices?: Record<string, number>;
   positions: HyperliquidPosition[];
   error?: string;
 }
@@ -101,6 +106,8 @@ export interface ProtocolSnapshots {
   uniswap: UniswapSnapshot;
   hyperliquid: HyperliquidSnapshot;
   exchange: ExchangeSnapshot;
+  /** Bybit and Binance testnet accounts and Coinbase public prices. */
+  exchanges?: ExchangeDeskSnapshot;
 }
 
 export interface UserThresholds {
@@ -113,6 +120,14 @@ export interface UserThresholds {
   maxSingleActionUsd: number;
   maxEvmSwapEth: number;
   maxUsdcAction: number;
+  /** Largest single Telegram money request the wearer can pay (testnet USDC). */
+  maxRequestUsdc: number;
+  /** Most testnet USDC paid to requesters in any rolling 24 hours. */
+  dailyRequestUsdc: number;
+  /** Largest single Telegram money request the wearer can pay in testnet TON. */
+  maxRequestTon: number;
+  /** Most testnet TON paid to requesters in any rolling 24 hours. */
+  dailyRequestTon: number;
 }
 
 export const DEFAULT_THRESHOLDS: UserThresholds = {
@@ -125,24 +140,35 @@ export const DEFAULT_THRESHOLDS: UserThresholds = {
   maxSingleActionUsd: 1000,
   maxEvmSwapEth: 0.25,
   maxUsdcAction: 500,
+  maxRequestUsdc: 25,
+  dailyRequestUsdc: 50,
+  maxRequestTon: 2,
+  dailyRequestTon: 5,
 };
 
 export type ExecutableActionType =
+  | ExchangeActionType
   | 'aave_repay'
   | 'aave_supply'
   | 'uniswap_swap'
-  | 'hl_trim';
+  | 'hl_trim'
+  | 'usdc_payout'
+  | 'ton_payout';
 
 export interface PendingAction {
   id: string;
-  source: 'watcher' | 'voice';
-  protocol: 'aave' | 'uniswap' | 'hyperliquid';
+  source: 'watcher' | 'voice' | 'telegram';
+  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'sepolia' | 'bybit' | 'binance' | 'ton';
   actionType: ExecutableActionType;
   headline: string;
   factLine: string;
   comparisonLine?: string;
   actionPrompt: string;
   params: {
+    symbol?: string;
+    side?: 'buy' | 'sell';
+    qty?: number;
+    price?: number;
     tokenIn?: string;
     tokenOut?: string;
     amount?: number;
@@ -150,6 +176,8 @@ export interface PendingAction {
     coin?: string;
     slippageBps?: number;
     feeTier?: number;
+    to?: string;
+    requestId?: string;
   };
   createdAt: number;
   expiresAt: number;
@@ -159,9 +187,9 @@ export interface PendingAction {
 export interface ExecutionReceipt {
   id: string;
   actionId: string;
-  protocol: 'aave' | 'uniswap' | 'hyperliquid';
+  protocol: 'aave' | 'uniswap' | 'hyperliquid' | 'sepolia' | 'bybit' | 'binance' | 'ton';
   actionType: ExecutableActionType;
-  network: 'sepolia' | 'hyperliquid-testnet';
+  network: 'sepolia' | 'hyperliquid-testnet' | 'bybit-testnet' | 'binance-spot-testnet' | 'ton-testnet';
   summary: string;
   beforeFact: string;
   afterFact: string;
@@ -174,6 +202,9 @@ export interface ExecutionReceipt {
 export type LensMode =
   | 'idle'
   | 'alert'
+  | 'signal'
+  | 'brief'
+  | 'notice'
   | 'confirm'
   | 'voice_listening'
   | 'executing'
@@ -186,6 +217,10 @@ export interface LensViewState {
   paired: boolean;
   pairingCode?: string;
   pendingAction?: PendingAction | null;
+  signal?: Signal | null;
+  queueSize?: number;
+  briefLines?: string[];
+  noticeText?: string;
   lastReceipt?: ExecutionReceipt | null;
   snapshots?: ProtocolSnapshots | null;
   positionPageIndex?: number;
@@ -203,14 +238,14 @@ export interface PairingSession {
 
 export type WsServerMessage =
   | { type: 'state'; state: LensViewState; session: PairingSession }
-  | { type: 'alert'; action: PendingAction }
+  | { type: 'signal'; signal: Signal }
   | { type: 'confirm'; action: PendingAction }
   | { type: 'executing'; actionId: string; label: string }
   | { type: 'receipt'; receipt: ExecutionReceipt }
   | { type: 'error'; message: string };
 
 export type WsClientMessage =
-  | { type: 'register'; code?: string }
+  | { type: 'register'; code?: string; client?: 'glasses' }
   | { type: 'tap_confirm'; actionId: string }
   | { type: 'dismiss'; actionId?: string }
   | { type: 'cycle_view' }

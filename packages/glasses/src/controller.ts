@@ -17,8 +17,9 @@ import {
   type WsServerMessage,
 } from '@chainvision/shared';
 
-const BACKEND_ORIGIN = 'http://127.0.0.1:8787';
-const WS_URL = 'ws://127.0.0.1:8787/ws';
+// The one place the backend origin is set; app.json's network whitelist must list the same origin.
+const BACKEND_ORIGIN: string = import.meta.env.VITE_CHAINVISION_BACKEND;
+const WS_URL = `${BACKEND_ORIGIN.replace(/^http/, 'ws')}/ws`;
 const STORAGE_KEY = 'chainvision_state_v1';
 const SWIPE_DEBOUNCE_MS = 650;
 const TAP_LOCKOUT_MS = 1500;
@@ -82,7 +83,7 @@ export class GlassesController {
       await this.renderToGlasses(this.state);
       this.onUiUpdate(this.state, this.session, 'Connected (HTTP + WS)');
     } catch {
-      this.onUiUpdate(this.state, this.session, 'Backend offline at 127.0.0.1:8787');
+      this.onUiUpdate(this.state, this.session, `Backend offline at ${BACKEND_ORIGIN}`);
     }
   }
 
@@ -90,6 +91,7 @@ export class GlassesController {
     try {
       this.ws = new WebSocket(WS_URL);
       this.ws.onopen = () => {
+        this.ws?.send(JSON.stringify({ type: 'register', client: 'glasses' }));
         this.onUiUpdate(this.state, this.session, 'Live WS connected');
       };
       this.ws.onmessage = (ev) => {
@@ -187,7 +189,11 @@ export class GlassesController {
         (prev, i) =>
           prev.containerID === layout.textObject[i]?.containerID &&
           prev.isEventCapture === layout.textObject[i]?.isEventCapture &&
-          prev.borderWidth === layout.textObject[i]?.borderWidth,
+          prev.borderWidth === layout.textObject[i]?.borderWidth &&
+          prev.xPosition === layout.textObject[i]?.xPosition &&
+          prev.yPosition === layout.textObject[i]?.yPosition &&
+          prev.width === layout.textObject[i]?.width &&
+          prev.height === layout.textObject[i]?.height,
       );
 
     if (sameShape) {
@@ -305,6 +311,20 @@ export class GlassesController {
   }
 
   private async handleSingleTap(): Promise<void> {
+    if (this.state.mode === 'signal' && this.state.signal) {
+      const action = this.state.signal.action;
+      if (action) {
+        await fetch(`${BACKEND_ORIGIN}/api/actions/confirm`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ actionId: action.id, source: 'glasses_tap' }),
+        });
+      } else {
+        await this.dismissToBlank();
+      }
+      return;
+    }
+
     if (
       (this.state.mode === 'alert' || this.state.mode === 'confirm') &&
       this.state.pendingAction
@@ -323,7 +343,7 @@ export class GlassesController {
       return;
     }
 
-    if (this.state.mode === 'result' || this.state.mode === 'error') {
+    if (['result', 'error', 'brief', 'notice'].includes(this.state.mode)) {
       await this.dismissToBlank();
     }
   }
@@ -392,6 +412,16 @@ export class GlassesController {
       this.state = data.state;
       await this.renderToGlasses(this.state);
       this.onUiUpdate(this.state, this.session, 'Voice command prepared');
+    }
+  }
+
+  async showBrief(): Promise<void> {
+    const res = await fetch(`${BACKEND_ORIGIN}/api/brief`, { method: 'POST' });
+    const data = (await res.json()) as { state?: LensViewState };
+    if (data.state) {
+      this.state = data.state;
+      await this.renderToGlasses(this.state);
+      this.onUiUpdate(this.state, this.session, 'What matters');
     }
   }
 

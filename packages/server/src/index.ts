@@ -4,12 +4,14 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import type { WsClientMessage } from '@chainvision/shared';
 import { loadConfig } from './config.js';
+import { isWearerRequest } from './telegram/initdata.js';
+import type { TelegramUpdate } from './telegram/bot.js';
 import { ChainVisionEngine } from './watcher/engine.js';
 
 function setCors(res: http.ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Telegram-Init-Data');
 }
 
 function sendJson(res: http.ServerResponse, status: number, payload: unknown): void {
@@ -43,7 +45,9 @@ const MIME: Record<string, string> = {
 
 export function createServer() {
   const config = loadConfig();
-  const engine = new ChainVisionEngine(config);
+  const engine = new ChainVisionEngine(config, {
+    stateFile: config.stateFile ?? path.resolve(import.meta.dirname, '../../../.chainvision/state.json'),
+  });
   const miniappDist = path.resolve(import.meta.dirname, '../../miniapp/dist');
 
   const server = http.createServer(async (req, res) => {
@@ -68,6 +72,8 @@ export function createServer() {
           sepoliaAddress: config.sepoliaAddress,
           hyperliquidAgentAddress: config.hyperliquidAgentAddress,
           hyperliquidAccountConfigured: Boolean(config.hyperliquidAccountAddress),
+          glassesConnected: engine.glassesConnected,
+          payoutToken: engine.payout.token.address,
         });
         return;
       }
@@ -117,6 +123,7 @@ export function createServer() {
           transcript: body.transcript ?? '',
           parse: out.parse,
           pendingAction: out.pendingAction,
+          alert: out.alert,
           state: engine.getLensState(),
         });
         return;
@@ -131,6 +138,7 @@ export function createServer() {
           stt,
           parse: out.parse,
           pendingAction: out.pendingAction,
+          alert: out.alert,
           state: engine.getLensState(),
         });
         return;
@@ -154,8 +162,92 @@ export function createServer() {
       if (req.method === 'POST' && url.pathname === '/api/actions/dismiss') {
         const raw = (await readBody(req)).toString('utf8');
         const body = JSON.parse(raw || '{}') as { actionId?: string };
-        engine.dismissToBlank(body.actionId);
+        engine.dismissToBlank();
         sendJson(res, 200, { ok: true, state: engine.getLensState() });
+        return;
+      }
+
+      if (url.pathname.startsWith('/api/requesters')) {
+        const wearer = isWearerRequest({
+          initData: req.headers['x-telegram-init-data'] as string | undefined,
+          botToken: config.telegramBotToken,
+          wearerChatId: engine.getSession().telegramChatId,
+          remoteAddress: req.socket.remoteAddress,
+          host: req.headers.host,
+          forwarded: Boolean(req.headers['x-forwarded-for'] || req.headers.forwarded || req.headers['x-real-ip']),
+        });
+        if (!wearer) {
+          sendJson(res, 403, { ok: false, error: 'Only the paired wearer can manage requesters' });
+          return;
+        }
+        const list = () => ({
+          requesters: engine.requests.requesters,
+          requests: engine.requests.requests.slice(-20).reverse(),
+          paidLast24hUsdc: engine.requests.paidLastDay(Date.now()),
+          caps: {
+            maxRequestUsdc: engine.getSession().thresholds.maxRequestUsdc,
+            dailyRequestUsdc: engine.getSession().thresholds.dailyRequestUsdc,
+          },
+        });
+        if (req.method === 'GET' && url.pathname === '/api/requesters') {
+          sendJson(res, 200, { ok: true, ...list() });
+          return;
+        }
+        if (req.method === 'POST' && (url.pathname === '/api/requesters/approve' || url.pathname === '/api/requesters/remove')) {
+          const raw = (await readBody(req)).toString('utf8');
+          const body = JSON.parse(raw || '{}') as { telegramUserId?: string };
+          const id = String(body.telegramUserId ?? '');
+          const ok = url.pathname.endsWith('/approve') ? Boolean(engine.requests.approve(id, Date.now())) : engine.requests.remove(id);
+          sendJson(res, ok ? 200 : 404, { ok, ...list() });
+          return;
+        }
+      }
+
+      // Simulator and verifier only: feed a Telegram update through the bot's own handler.
+      if (req.method === 'POST' && url.pathname === '/api/dev/telegram-update') {
+        const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
+        if (!config.devTelegramUpdates || !local) {
+          sendJson(res, 404, { ok: false, error: 'Not found' });
+          return;
+        }
+        const update = JSON.parse((await readBody(req)).toString('utf8') || '{}') as TelegramUpdate;
+        const messageIds = await engine.telegram.handleUpdate(update, engine.botHandlers());
+        sendJson(res, 200, { ok: true, messageIds, state: engine.getLensState() });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/signals') {
+        sendJson(res, 200, { ok: true, signals: engine.queue.ranked(Date.now()) });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/brief') {
+        const lines = engine.showBrief();
+        sendJson(res, 200, { ok: true, lines, state: engine.getLensState() });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/alerts') {
+        sendJson(res, 200, { ok: true, rules: engine.listAlerts() });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/alerts') {
+        const raw = (await readBody(req)).toString('utf8');
+        const body = JSON.parse(raw || '{}') as { asset?: string; direction?: string; price?: number };
+        const result = await engine.addAlert(
+          { asset: String(body.asset ?? '').toUpperCase(), direction: String(body.direction ?? ''), price: Number(body.price) },
+          'miniapp',
+        );
+        sendJson(res, result.ok ? 200 : 400, result);
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/alerts/remove') {
+        const raw = (await readBody(req)).toString('utf8');
+        const body = JSON.parse(raw || '{}') as { id?: string };
+        const removed = engine.removeAlert(String(body.id ?? ''));
+        sendJson(res, removed ? 200 : 404, { ok: removed, rules: engine.listAlerts() });
         return;
       }
 
@@ -173,6 +265,25 @@ export function createServer() {
         }
         const tg = await engine.telegram.sendReceipt(last, engine.getSession().telegramChatId);
         sendJson(res, 200, { ok: tg.sent, result: tg });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/ton') {
+        sendJson(res, 200, { ok: true, ...engine.getTonStatus() });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/ton/connect') {
+        const raw = (await readBody(req)).toString('utf8');
+        const body = JSON.parse(raw || '{}') as { address?: string; chain?: string };
+        const connected = await engine.connectTonWallet(body.address ? body : null);
+        sendJson(res, 200, { ok: true, connected });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/miniapp/tonconnect-manifest.json') {
+        const base = (config.telegramMiniAppUrl ?? `${config.serverPublicUrl}/miniapp`).replace(/\/+$/, '');
+        sendJson(res, 200, { url: base, name: 'ChainVision', iconUrl: `${base}/icon-180.png` });
         return;
       }
 
@@ -202,6 +313,7 @@ export function createServer() {
 
   const wss = new WebSocketServer({ server, path: '/ws' });
   wss.on('connection', (ws) => {
+    let isGlasses = false;
     const unsub = engine.subscribe((msg) => {
       if (ws.readyState === ws.OPEN) {
         ws.send(JSON.stringify(msg));
@@ -211,10 +323,13 @@ export function createServer() {
     ws.on('message', async (raw) => {
       try {
         const msg = JSON.parse(raw.toString('utf8')) as WsClientMessage;
-        if (msg.type === 'tap_confirm') {
+        if (msg.type === 'register' && msg.client === 'glasses' && !isGlasses) {
+          isGlasses = true;
+          engine.setGlassesConnected(1);
+        } else if (msg.type === 'tap_confirm') {
           await engine.confirmPendingAction(msg.actionId);
         } else if (msg.type === 'dismiss') {
-          engine.dismissToBlank(msg.actionId);
+          engine.dismissToBlank();
         } else if (msg.type === 'cycle_view') {
           engine.cyclePositionView();
         } else if (msg.type === 'request_sync') {
@@ -232,7 +347,10 @@ export function createServer() {
       }
     });
 
-    ws.on('close', unsub);
+    ws.on('close', () => {
+      unsub();
+      if (isGlasses) engine.setGlassesConnected(-1);
+    });
   });
 
   return { server, wss, engine, config };

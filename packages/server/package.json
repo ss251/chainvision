@@ -12,6 +12,9 @@
   "dependencies": {
     "@chainvision/shared": "0.1.0",
     "@msgpack/msgpack": "^3.0.0-beta2",
+    "@ton/core": "^0.63.1",
+    "@ton/crypto": "^3.3.0",
+    "@ton/ton": "^16.3.0",
     "viem": "^2.21.54",
     "ws": "^8.18.0",
     "zod": "^3.24.1"
