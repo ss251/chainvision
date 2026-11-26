@@ -49,6 +49,7 @@ export function createServer() {
     stateFile: config.stateFile ?? path.resolve(import.meta.dirname, '../../../.chainvision/state.json'),
   });
   const miniappDist = path.resolve(import.meta.dirname, '../../miniapp/dist');
+  const judgeDist = path.resolve(import.meta.dirname, '../../judge/dist');
 
   const server = http.createServer(async (req, res) => {
     setCors(res);
@@ -285,6 +286,21 @@ export function createServer() {
         const base = (config.telegramMiniAppUrl ?? `${config.serverPublicUrl}/miniapp`).replace(/\/+$/, '');
         sendJson(res, 200, { url: base, name: 'ChainVision', iconUrl: `${base}/icon-180.png` });
         return;
+      }
+
+      // Serve zero-key 60-second judge walkthrough at /judge
+      if (req.method === 'GET' && (url.pathname === '/judge' || url.pathname.startsWith('/judge/'))) {
+        const rel = url.pathname.replace(/^\/judge\/?/, '') || 'index.html';
+        const candidate = path.join(judgeDist, rel);
+        const safePath = candidate.startsWith(judgeDist) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()
+          ? candidate
+          : path.join(judgeDist, 'index.html');
+        if (fs.existsSync(safePath)) {
+          const ext = path.extname(safePath);
+          res.writeHead(200, { 'content-type': MIME[ext] ?? 'application/octet-stream' });
+          fs.createReadStream(safePath).pipe(res);
+          return;
+        }
       }
 
       // Serve Telegram Mini App bundle at /miniapp

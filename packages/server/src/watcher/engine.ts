@@ -9,9 +9,12 @@ import {
   SIGNAL_LINE_MAX,
   SIGNAL_RESHOW_MS,
   SIGNAL_SHOW_MS,
+  MarkPriceHistory,
   SignalQueue,
   checkNewRule,
   checkPayout,
+  estimateLiquidationEtaMinutes,
+  formatLiqRiskLine,
   formatUsdc,
   isOpen,
   moneyRequestSignal,
@@ -134,6 +137,7 @@ export class ChainVisionEngine {
   private session: PairingSession;
   private snapshots: ProtocolSnapshots | null = null;
   private latestPrices: Record<string, number> = {};
+  private readonly markHistory = new MarkPriceHistory();
   private alertRules: PriceAlertRule[];
   private pendingAction: PendingAction | null = null;
   private lastReceipt: ExecutionReceipt | null = null;
@@ -522,7 +526,16 @@ export class ChainVisionEngine {
 
     const hyperliquid: Signal[] = [];
     for (const pos of s.hyperliquid.positions) {
+      const histKey = `hl:${pos.coin}`;
+      if (!s.hyperliquid.error) this.markHistory.record(histKey, pos.markPx, now);
       if (pos.liqDistancePct === null || pos.liqDistancePct >= th.hlMinLiqDistancePct) continue;
+      const etaMinutes = estimateLiquidationEtaMinutes({
+        side: pos.side,
+        markPx: pos.markPx,
+        liqPx: pos.liquidationPx,
+        samples: this.markHistory.samples(histKey, now),
+        now,
+      });
       hyperliquid.push(
         make(
           {
@@ -530,7 +543,13 @@ export class ChainVisionEngine {
             source: 'hyperliquid',
             kind: 'liquidation_distance',
             severity: severityFor(pos.liqDistancePct, th.hlMinLiqDistancePct),
-            line: `HL ${pos.coin} ${pos.side} LIQ ${pos.liqDistancePct.toFixed(1)}% AWAY`,
+            line: formatLiqRiskLine({
+              venue: 'HL',
+              coin: pos.coin,
+              side: pos.side,
+              liqDistancePct: pos.liqDistancePct,
+              etaMinutes,
+            }),
             lossDistancePct: pos.liqDistancePct,
             usdAtRisk: pos.notionalUsd / Math.max(1, pos.leverage),
           },
@@ -573,12 +592,42 @@ export class ChainVisionEngine {
       }
     }
 
+    if (s.exchanges && !s.exchanges.bybit.error) {
+      for (const p of s.exchanges.bybit.positions) {
+        this.markHistory.record(`bybit:${p.symbol}`, p.markPx, now);
+      }
+    }
     const exchange: Signal[] = s.exchanges
-      ? this.desk.signalSpecs(s.exchanges, th, now).map((spec) => make(spec.base, spec.action))
+      ? this.desk
+          .signalSpecs(s.exchanges, th, now, (p) =>
+            estimateLiquidationEtaMinutes({
+              side: p.side,
+              markPx: p.markPx,
+              liqPx: p.liqPx,
+              samples: this.markHistory.samples(`bybit:${p.symbol}`, now),
+              now,
+            }),
+          )
+          .map((spec) => make(spec.base, spec.action))
       : [];
     const venue = s.exchange.venue === 'bybit-testnet' ? 'BYBIT' : 'BINANCE';
     for (const pos of s.exchange.positions) {
+      const histKey = `exchange:${s.exchange.venue}:${pos.symbol}`;
+      if (!s.exchange.error) this.markHistory.record(histKey, pos.markPx, now);
       if (pos.liqDistancePct === null || pos.liqDistancePct >= th.exchangeMinLiqDistancePct) continue;
+      const liqPx =
+        pos.markPx > 0
+          ? pos.side === 'LONG'
+            ? pos.markPx * (1 - pos.liqDistancePct / 100)
+            : pos.markPx * (1 + pos.liqDistancePct / 100)
+          : null;
+      const etaMinutes = estimateLiquidationEtaMinutes({
+        side: pos.side,
+        markPx: pos.markPx,
+        liqPx,
+        samples: this.markHistory.samples(histKey, now),
+        now,
+      });
       exchange.push(
         make(
           {
@@ -586,7 +635,13 @@ export class ChainVisionEngine {
             source: 'exchange',
             kind: 'liquidation_distance',
             severity: severityFor(pos.liqDistancePct, th.exchangeMinLiqDistancePct),
-            line: `${venue} ${pos.symbol} ${pos.side} LIQ ${pos.liqDistancePct.toFixed(1)}% AWAY`,
+            line: formatLiqRiskLine({
+              venue,
+              coin: pos.symbol,
+              side: pos.side,
+              liqDistancePct: pos.liqDistancePct,
+              etaMinutes,
+            }),
             lossDistancePct: pos.liqDistancePct,
             usdAtRisk: pos.size * pos.markPx,
           },
