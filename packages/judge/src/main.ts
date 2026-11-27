@@ -145,7 +145,7 @@ function render(snap: JudgeSnapshot): void {
           <h1>ChainVision</h1>
           <p class="subtitle">
             Blank until real risk breaches or a contact asks to be paid, then one ranked line resolved in one tap.
-            Runs from the repository with one command — no API keys required.
+            Hosted at <a href="https://chainvision-judge.vercel.app">chainvision-judge.vercel.app</a> (nothing to install, no API keys) — or run locally from the repository with <code>npm run dev:judge</code>.
           </p>
         </div>
         <div class="safety-pill">
