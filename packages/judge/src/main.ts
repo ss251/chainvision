@@ -237,7 +237,7 @@ function render(snap: JudgeSnapshot): void {
         <h3>Recorded Testnet Proofs (PR #6, commit <code>12871f3</code>)</h3>
         <p class="sub">
           Sepolia transactions were checked against Sepolia on-chain data (block, timestamp, method, and token transfers match).
-          The Hyperliquid fill matches order <code>65942782652</code> (reduce-only IOC sell of <code>0.0181 ETH</code> at <code>$1,653.7</code>, <code>2026-11-25 06:31:07 UTC</code>, position <code>0.0363 -> 0.0182</code>) and links directly to the fill transaction in the Hyperliquid Testnet Explorer SPA.
+          The Hyperliquid link opens account <code>0x1449…5182</code> on the Hyperliquid Testnet Explorer, which lists the <code>2026-11-25 06:31:07 UTC</code> Place order transaction (<code>0x3be5…a863</code>, block <code>787719700</code>); the fill details (order <code>65942782652</code>, reduce-only IOC sell of <code>0.0181 ETH</code> at <code>$1,653.7</code>, position <code>0.0363 -> 0.0182</code>) come from the public Hyperliquid testnet API.
           Signed Bybit/Binance writes and TON payouts await testnet keys and faucet coins from the owner.
         </p>
         <div class="table-wrap">

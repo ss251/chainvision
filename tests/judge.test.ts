@@ -2,8 +2,8 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BRIEF_EMPTY_TEXT, SIGNAL_LENS_LINE_MAX, renderLensPage, signalLensLine } from '@chainvision/shared';
 import {
+  HL_ACCOUNT_ADDRESS,
   HL_FILL_EXPLORER_URL,
-  HL_FILL_TX_HASH,
   JUDGE_STEPS,
   JudgeWalkthrough,
   PROVENANCE_DEFINITIONS,
@@ -101,8 +101,9 @@ describe('zero-key /judge walkthrough', () => {
     expect(hlDone.lensState.lastReceipt?.txHashOrOrderId).toBe('65942782652');
     expect(hlDone.lensLineLength).toBeLessThanOrEqual(SIGNAL_LENS_LINE_MAX);
 
-    // Telegram /ask -> recorded single-chat Sepolia payout
+    // Telegram /ask -> switching steps clears prior HL Telegram receipt before tapping
     const tg = walk.selectStep('telegram_request');
+    expect(tg.telegramMessages).toHaveLength(0);
     expect(tg.provenance.kind).toBe('recorded');
     expect(tg.provenance.proofUrl).toContain(SEPOLIA_PAYOUT_20_HASH);
     const tgLine = signalLensLine(tg.lensState.signal!);
@@ -113,8 +114,9 @@ describe('zero-key /judge walkthrough', () => {
     expect(tgDone.lensState.lastReceipt?.txHashOrOrderId).toBe(SEPOLIA_PAYOUT_20_HASH);
     expect(tgDone.telegramMessages).toHaveLength(1);
 
-    // Voice brief after all three signals resolved -> NOTHING NEEDS YOU
+    // Voice brief after all three signals resolved -> clears prior Sepolia receipt and shows NOTHING NEEDS YOU
     const emptyBrief = walk.selectStep('voice_brief');
+    expect(emptyBrief.telegramMessages).toHaveLength(0);
     expect(emptyBrief.lensState.mode).toBe('brief');
     expect(emptyBrief.layout.textObject[1]?.content).toBe(BRIEF_EMPTY_TEXT);
 
@@ -172,13 +174,13 @@ describe('zero-key /judge walkthrough', () => {
     expect(tappedOrder.lensState.lastReceipt?.telegramPosted).toBe(false);
     expect(tappedOrder.layout.textObject[1]?.content).toContain('LOCAL RECEIPT');
 
-    // Every recorded proof in the table points to a specific tx (never an explorer homepage)
+    // Every recorded proof in the table points to a specific tx or account page (never an explorer homepage)
     expect(VERIFIED_PROOFS.length).toBeGreaterThanOrEqual(5);
     for (const proof of VERIFIED_PROOFS) {
       expect(proof.explorerUrl).toMatch(/^https:\/\//);
       expect(proof.explorerUrl).not.toMatch(/\/explorer\/?$/);
     }
-    expect(VERIFIED_PROOFS.find((p) => p.id === 'hl_trim')?.explorerUrl).toContain(HL_FILL_TX_HASH);
+    expect(VERIFIED_PROOFS.find((p) => p.id === 'hl_trim')?.explorerUrl).toContain(HL_ACCOUNT_ADDRESS);
   });
 
   it('declines a Telegram money request on swipe down as an example without moving funds', () => {

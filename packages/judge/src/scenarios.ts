@@ -116,32 +116,33 @@ export interface JudgeSnapshot {
   lastActionNote: string;
 }
 
+export const HL_ACCOUNT_ADDRESS = '0x14490658fc8C7e3f5cDc68f01317Bdf684715182';
 export const HL_FILL_TX_HASH =
   '0x3be55891d105ce793d5f042ef3a61401040070776c08ed4bdfae03e49009a863';
 export const HL_FILL_EXPLORER_URL =
-  `https://app.hyperliquid-testnet.xyz/explorer/tx/${HL_FILL_TX_HASH}`;
+  `https://app.hyperliquid-testnet.xyz/explorer/address/${HL_ACCOUNT_ADDRESS}`;
 export const SEPOLIA_PAYOUT_20_HASH =
   '0xc453a91d030307a604667169047689f8703f8cc98de4281c4a33fa5252d8178d';
 export const SEPOLIA_PAYOUT_20_URL =
   `https://sepolia.etherscan.io/tx/${SEPOLIA_PAYOUT_20_HASH}`;
 
 /**
- * Fallback market prices captured from public testnet/Coinbase endpoints so the
- * page still renders if public feeds are blocked or rate-limited.
+ * Fallback market prices captured in one fetch from the public testnet/Coinbase endpoints
+ * at fallbackRecordedAt so the page still renders if public feeds are blocked or rate-limited.
  */
 export const RECORDED_FALLBACK_PRICES: LiveMarketPrices = {
-  hlEth: 1684.5,
-  hlBtc: 60380.0,
-  bybitBtc: 60000.0,
-  bybitEth: 1685.2,
-  binanceBtc: 60448.01,
-  binanceEth: 1685.8,
-  coinbaseBtc: 60370.08,
-  coinbaseEth: 1683.8,
+  hlEth: 1751.5,
+  hlBtc: 61692.5,
+  bybitBtc: 60024.15,
+  bybitEth: 1691.47,
+  binanceBtc: 60584,
+  binanceEth: 1692.08,
+  coinbaseBtc: 60498.37,
+  coinbaseEth: 1689.53,
   liveSources: [],
   feedState: 'loading',
   updatedAt: null,
-  fallbackRecordedAt: '2026-11-27 00:05 UTC',
+  fallbackRecordedAt: '2026-11-27 00:31 UTC',
 };
 
 /**
@@ -196,11 +197,11 @@ export const VERIFIED_PROOFS: readonly VerifiedProof[] = [
     id: 'hl_trim',
     action: 'Hyperliquid ETH-PERP reduce-only IOC sell (0.0181 ETH @ $1,653.7)',
     network: 'Hyperliquid Testnet',
-    recordedAt: '2026-11-25 06:31:07 UTC',
-    details: 'sim:demo — order 65942782652, position 0.0363 -> 0.0182 ETH via non-withdrawable source:"b" agent',
-    txOrOrderId: HL_FILL_TX_HASH,
+    recordedAt: '2026-11-25 06:31:07 UTC (block 787719700)',
+    details: 'sim:demo — order 65942782652 (tx 0x3be5..a863), position 0.0363 -> 0.0182 ETH via non-withdrawable source:"b" agent',
+    txOrOrderId: HL_ACCOUNT_ADDRESS,
     explorerUrl: HL_FILL_EXPLORER_URL,
-    explorerLabel: 'Hyperliquid Testnet Explorer (tx)',
+    explorerLabel: 'Hyperliquid Testnet Account (0x1449..5182)',
   },
 ];
 
@@ -588,6 +589,7 @@ export class JudgeWalkthrough {
   selectStep(id: JudgeStepId): JudgeSnapshot {
     const now = this.nowFn();
     this.stepId = id;
+    this.telegramMessages = [];
     const snapshots = this.snapshots();
 
     if (id === 'blank') {
@@ -730,7 +732,7 @@ export class JudgeWalkthrough {
               `Order ID: 65942782652 · Tx: ${HL_FILL_TX_HASH}`,
             ],
             explorerUrl: HL_FILL_EXPLORER_URL,
-            explorerLabel: 'Open Hyperliquid Testnet Fill Tx',
+            explorerLabel: 'Open Hyperliquid Account Page (0x1449..5182)',
           },
         ];
         this.lastActionNote =
@@ -873,6 +875,7 @@ export class JudgeWalkthrough {
   triggerVoiceBinanceCard(): JudgeSnapshot {
     const now = this.nowFn();
     this.stepId = 'voice_brief';
+    this.telegramMessages = [];
     const action = makeBinanceVoiceCard(this.prices, now);
     this.lensState = {
       mode: 'confirm',
@@ -943,9 +946,9 @@ export class JudgeWalkthrough {
           kind: 'recorded',
           badgeText: PROVENANCE_DEFINITIONS.recorded.label,
           detail:
-            'Recorded from ChainVision’s 2026-11-25 06:31:07 UTC Hyperliquid testnet run (order 65942782652): reduce-only IOC sell of 0.0181 ETH at $1,653.7, moving ETH-PERP from 0.0363 to 0.0182 via a non-withdrawable source:"b" agent.',
+            'Recorded from ChainVision’s 2026-11-25 06:31:07 UTC Hyperliquid testnet run (order 65942782652): reduce-only IOC sell of 0.0181 ETH at $1,653.7, moving ETH-PERP from 0.0363 to 0.0182 via a non-withdrawable source:"b" agent. The explorer link opens the account page (0x1449..5182), which lists this Place order transaction (0x3be5..a863, block 787719700).',
           proofUrl: HL_FILL_EXPLORER_URL,
-          proofLabel: 'Hyperliquid Testnet Explorer tx 0x3be55891..9a863 (Order 65942782652)',
+          proofLabel: 'Hyperliquid Account 0x1449..5182 (lists tx 0x3be5..a863)',
         };
       }
       const priceNote = priceContextNote(p, 'Hyperliquid Testnet', p.hlEth);

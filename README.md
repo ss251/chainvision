@@ -9,7 +9,7 @@
 
 ## Verified Testnet Proofs
 
-Real testnet executions recorded from ChainVision's `verify:testnet` and `sim:demo` (`evenhub-simulator@0.9.5`) runs on PR #6 (`12871f3`). The four Sepolia transactions were checked against Sepolia on-chain data (block, timestamp, method, and token transfers match); the Hyperliquid fill matches order `65942782652` via the Hyperliquid testnet API and links directly to the fill transaction in the Hyperliquid Testnet Explorer SPA:
+Real testnet executions recorded from ChainVision's `verify:testnet` and `sim:demo` (`evenhub-simulator@0.9.5`) runs on PR #6 (`12871f3`). The four Sepolia transactions were checked against Sepolia on-chain data (block, timestamp, method, and token transfers match). The Hyperliquid link opens the testnet account's explorer page (`0x1449…5182`), which lists the `2026-11-25 06:31:07 UTC` Place order transaction (`0x3be5…a863`, block `787719700`); fill size and price (`0.0181 ETH @ $1,653.7`, position `0.0363 -> 0.0182`, order `65942782652`) come from the public Hyperliquid testnet API:
 
 | Action | Network | Recorded Run | Explorer Proof |
 | --- | --- | --- | --- |
@@ -17,7 +17,7 @@ Real testnet executions recorded from ChainVision's `verify:testnet` and `sim:de
 | Uniswap v3 swap (5 USDC -> 17.15 DAI) | Ethereum Sepolia | `verify:testnet` · 2026-11-25 06:28:48 UTC (block `12207804`) | [`0x784a80d4…6b0578`](https://sepolia.etherscan.io/tx/0x784a80d485cf97a27b84909f4290871b4a9e009b19612de3cbdde151ba6b0578) |
 | Telegram `/ask 2 USDC` payout to Kit | Ethereum Sepolia | `verify:testnet` · 2026-11-25 06:29:00 UTC (block `12207805`, TG msg 32) | [`0xa0dee545…4b68be`](https://sepolia.etherscan.io/tx/0xa0dee5452b95d4fcfabeefb13947d8a1d25b10d067baea07608f219dde4b68be) |
 | Telegram `/ask 20 USDC` payout to Kit | Ethereum Sepolia | `sim:demo` · 2026-11-25 06:31:24 UTC (block `12207816`, owner chat) | [`0xc453a91d…d8178d`](https://sepolia.etherscan.io/tx/0xc453a91d030307a604667169047689f8703f8cc98de4281c4a33fa5252d8178d) |
-| Hyperliquid ETH-PERP reduce-only IOC sell (`0.0181 ETH @ $1,653.7`, position `0.0363 -> 0.0182`) | Hyperliquid Testnet | `sim:demo` · 2026-11-25 06:31:07 UTC (order `65942782652`, non-withdrawable `source: "b"` agent) | [`0x3be55891…9a863` (HL Testnet Explorer)](https://app.hyperliquid-testnet.xyz/explorer/tx/0x3be55891d105ce793d5f042ef3a61401040070776c08ed4bdfae03e49009a863) |
+| Hyperliquid ETH-PERP reduce-only IOC sell (`0.0181 ETH @ $1,653.7`, position `0.0363 -> 0.0182`) | Hyperliquid Testnet | `sim:demo` · 2026-11-25 06:31:07 UTC (order `65942782652`, tx `0x3be5…a863`, block `787719700`, non-withdrawable `source: "b"` agent) | [`0x1449…5182` (HL Testnet Account Page)](https://app.hyperliquid-testnet.xyz/explorer/address/0x14490658fc8C7e3f5cDc68f01317Bdf684715182) |
 
 *Pending owner keys/faucet:* public Bybit testnet, Binance spot testnet, and Coinbase reads run live (`npm run verify:exchanges`), while signed exchange writes skip until testnet API keys are configured; the TON test wallet [`0QDNtIy-zwHMK5hdc0qVZoi2TkfZr_O3MjXcrq0H8QVdAYHl`](https://testnet.tonviewer.com/0QDNtIy-zwHMK5hdc0qVZoi2TkfZr_O3MjXcrq0H8QVdAYHl) reads live on toncenter testnet and awaits faucet coins from `@testgiver_ton_bot` for a live TON payout hash.
 
