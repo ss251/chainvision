@@ -5,7 +5,7 @@
 > **Testnet only · Non-custodial · Not financial advice.**  
 > ChainVision runs exclusively on **Ethereum Sepolia**, **Hyperliquid / Bybit / Binance Testnets** and **TON testnet**, plus two reads that need no account and move nothing: Coinbase public market data, and (optionally) the balance of your own TON mainnet wallet address. It never holds user funds, never asks for a mainnet private key, never gives financial advice, and never executes a transaction without an explicit single-tap confirmation on the glasses.
 
-> **For Judges (60-second evaluation, no API keys):** read [JUDGES.md](./JUDGES.md), run `npm run dev:judge` from the repository (or deploy `packages/judge/dist` as a static site) to click through the exact `576 × 288` Even G2 lens with no keys, and build the validated `.ehpk` package with `npm run pack:ehpk`.
+> **Try it in a minute, nothing to install:** open the live no-key judge walkthrough at **https://chainvision-judge.vercel.app** (also `/judge/`), download `chainvision.ehpk` from **[Release v1.0.0](https://github.com/ss251/chainvision/releases/tag/v1.0.0)**, or read [JUDGES.md](./JUDGES.md). To run the walkthrough locally from the repository with one command instead, use `npm run dev:judge`.
 
 ## Verified Testnet Proofs
 
@@ -290,7 +290,7 @@ npm run pack:ehpk
 This builds `@chainvision/shared` and `@chainvision/glasses`, runs `@evenrealities/evenhub-cli pack` against `packages/glasses/app.json` and `packages/glasses/dist` (`--sdk-ver 0.0.16`), outputs `chainvision.ehpk` in the repository root, and verifies that `package_id` (`com.chainvision.g2`), `version` (`0.1.0`), `min_app_version` (`2.2.10`), warnings (`[]`), and byte size all match `packages/glasses/app.json`.
 
 **Installing `chainvision.ehpk`:**
-- **Even Hub / G2 glasses:** build `chainvision.ehpk` locally with `npm run pack:ehpk` (or download it once published on a GitHub Release) and upload/sideload it through the Even Hub developer portal or CLI (`npx -y @evenrealities/evenhub-cli@0.2.0 create chainvision.ehpk` for a first draft, or `upload chainvision.ehpk` for subsequent builds). If you are pointing G2 at a hosted backend instead of `http://127.0.0.1:8787`, update the single `network` whitelist entry in `packages/glasses/app.json` before packing.
+- **Even Hub / G2 glasses:** download `chainvision.ehpk` from [Release v1.0.0](https://github.com/ss251/chainvision/releases/tag/v1.0.0) (or build it locally with `npm run pack:ehpk`) and upload/sideload it through the Even Hub developer portal or CLI (`npx -y @evenrealities/evenhub-cli@0.2.0 create chainvision.ehpk` for a first draft, or `upload chainvision.ehpk` for subsequent builds). If you are pointing G2 at a hosted backend instead of `http://127.0.0.1:8787`, update the single `network` whitelist entry in `packages/glasses/app.json` before packing.
 - **Even Hub Simulator (no glasses required):** run `npm run dev:server`, `npm run dev:glasses`, and `npm run sim`.
 
 **Publishing a release binary (binary is gitignored, not committed to git):**
@@ -303,7 +303,7 @@ gh release create v1.0.0 chainvision.ehpk \
 
 ### 7. Zero-Key Judge Walkthrough (`/judge`)
 
-`packages/judge` is a standalone static site (also served by the backend at `http://127.0.0.1:8787/judge/`, with `/judge` redirecting to `/judge/`) that **runs from the repository with one command** and needs **no API keys**. It renders the exact `576 × 288` Even G2 monochrome lens through `@chainvision/shared`'s `renderLensPage()`, enforces both `validateLensLayout()` and the 60-character line limit, pulls live public read-only prices (Hyperliquid Testnet, Bybit Testnet, Binance Spot Testnet, Coinbase Public; falling back to last recorded prices with their timestamp when feeds are unavailable), and walks a judge through five clearly labeled steps in under a minute:
+`packages/judge` is a standalone static site hosted at **https://chainvision-judge.vercel.app** (and `/judge/`), and also runs locally from the repository with one command (`npm run dev:judge`, or served by the backend at `http://127.0.0.1:8787/judge/` with `/judge` redirecting to `/judge/`) — **no API keys required**. It renders the exact `576 × 288` Even G2 monochrome lens through `@chainvision/shared`'s `renderLensPage()`, enforces both `validateLensLayout()` and the 60-character line limit, pulls live public read-only prices (Hyperliquid Testnet, Bybit Testnet, Binance Spot Testnet, Coinbase Public; falling back to last recorded prices with their timestamp when feeds are unavailable), and walks a judge through five clearly labeled steps in under a minute:
 
 1. Blank lens (`0` lit pixels — example)
 2. Exchange margin line with a one-tap Funding -> Trading move (example action; signed Bybit/Binance writes run on testnet once keys are supplied)

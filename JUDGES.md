@@ -3,11 +3,13 @@
 **Quiet, non-custodial crypto, exchange, and Telegram action HUD for Even Realities G2**  
 **Tracks:** Track 03 · Exchanges & Stocks · Track 02 · Crypto & DeFi · Best Telegram Integration
 
+> **Try it in a minute, nothing to install:** **https://chainvision-judge.vercel.app** (also `/judge/`) · **Packaged `.ehpk` build:** [Release v1.0.0](https://github.com/ss251/chainvision/releases/tag/v1.0.0)
+
 ---
 
-## 1. Try It Locally in 60 Seconds (No API Keys)
+## 1. Try It in 60 Seconds (No API Keys)
 
-ChainVision ships a standalone `/judge` walkthrough (`packages/judge`) that **runs from the repository with one command** and needs **no API keys**. It renders the exact `576 × 288` Even G2 monochrome lens through `@chainvision/shared`'s `renderLensPage()` and checks every frame against G2 limits and the 60-character line ceiling. Every step uses one of three labels defined on the page (**recorded from a real testnet run**, **live public data**, or **example**):
+Open the hosted no-key walkthrough at **https://chainvision-judge.vercel.app** (nothing to install), or run it locally from the repository with one command (`npm install && npm run dev:judge`). It renders the exact `576 × 288` Even G2 monochrome lens through `@chainvision/shared`'s `renderLensPage()` and checks every frame against G2 limits and the 60-character line ceiling. Every step uses one of three labels defined on the page (**recorded from a real testnet run**, **live public data**, or **example**):
 
 1. **Blank lens (`0` lit pixels) — example:** confirms G2 waveguides stay completely clear (`0/1000` chars) when nothing needs attention.
 2. **Exchange margin line -> one-tap move — example:** `BYBIT MARGIN LOW - TAP: MOVE 500 USDT FUNDING TO TRADING`. Shows an example of the Track 03 action alongside public Bybit/Coinbase prices; no Bybit testnet write has run yet, and signed exchange actions run on testnet once keys are supplied.
@@ -32,7 +34,7 @@ npm run pack:ehpk      # builds packages/glasses and packs + validates chainvisi
 ```
 
 - Manifest: `packages/glasses/app.json` (`com.chainvision.g2` v`0.1.0`, `min_app_version: 2.2.10`, `min_sdk_version: 0.0.16`, single whitelisted backend origin `http://127.0.0.1:8787`).
-- `*.ehpk` is gitignored rather than committed as a repo binary; once the owner publishes a GitHub Release, `chainvision.ehpk` can be attached via `gh release create` (see [README.md](./README.md#6-packaged-build-chainvisionehpk)).
+- `*.ehpk` is gitignored rather than committed as a repo binary; the packaged `chainvision.ehpk` is attached to [Release v1.0.0](https://github.com/ss251/chainvision/releases/tag/v1.0.0) and can be rebuilt locally anytime via `npm run pack:ehpk` (see [README.md](./README.md#6-packaged-build-chainvisionehpk)).
 - Local verification without hardware: `npm run build && npm run typecheck && npm test` (and `npm run sim` with `@evenrealities/evenhub-simulator@0.9.5`).
 
 ---
