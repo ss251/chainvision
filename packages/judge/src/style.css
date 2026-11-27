@@ -132,6 +132,35 @@ h1 {
   box-shadow: 0 0 8px rgba(74, 222, 128, 0.7);
 }
 
+.dot.stale {
+  background: var(--amber);
+}
+
+.legend-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.legend-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.legend-item .badge {
+  margin-bottom: 5px;
+}
+
+.legend-item p {
+  margin: 0;
+  line-height: 1.4;
+}
+
 .feed-item {
   color: var(--muted);
 }
@@ -545,6 +574,9 @@ td.mono {
   }
   .step-nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .legend-strip {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -27,7 +27,30 @@ export type JudgeStepId =
   | 'telegram_request'
   | 'voice_brief';
 
-export type ProvenanceKind = 'recorded_testnet' | 'live_public' | 'sandbox_replay';
+/**
+ * The only three provenance labels used on the judge page:
+ * - recorded: replayed from an executed ChainVision testnet run (always carries an explorer proof link)
+ * - live: fetched directly from public read-only endpoints in this browser (always carries a fetch timestamp)
+ * - example: scripted scenario or example action (no live keys or live position required)
+ */
+export type ProvenanceKind = 'recorded' | 'live' | 'example';
+
+export const PROVENANCE_DEFINITIONS: Record<ProvenanceKind, { label: string; description: string }> = {
+  recorded: {
+    label: 'RECORDED FROM A REAL TESTNET RUN',
+    description: 'Replayed from an executed ChainVision testnet run, with a direct link to its explorer transaction.',
+  },
+  live: {
+    label: 'LIVE PUBLIC DATA',
+    description: 'Fetched directly from public read-only endpoints in this browser, shown with its UTC timestamp.',
+  },
+  example: {
+    label: 'EXAMPLE',
+    description: 'Scripted scenario or example action showing how the lens and caps behave without keys or a live position.',
+  },
+};
+
+export type FeedState = 'loading' | 'live' | 'unavailable';
 
 export interface VerifiedProof {
   id: string;
@@ -50,7 +73,9 @@ export interface LiveMarketPrices {
   coinbaseBtc: number;
   coinbaseEth: number;
   liveSources: string[];
+  feedState: FeedState;
   updatedAt: number | null;
+  fallbackRecordedAt: string;
 }
 
 export interface JudgeStepMeta {
@@ -59,16 +84,19 @@ export interface JudgeStepMeta {
   label: string;
   shortTitle: string;
   track: string;
-  provenance: ProvenanceKind;
-  provenanceLabel: string;
-  provenanceDetail: string;
   whatToTry: string;
+}
+
+export interface ActiveProvenance {
+  kind: ProvenanceKind;
+  badgeText: string;
+  detail: string;
   proofUrl?: string;
   proofLabel?: string;
 }
 
 export interface TelegramMessagePreview {
-  recipient: 'Wearer' | 'Kit (Requester)';
+  recipient: 'Wearer (Owner Chat)';
   title: string;
   lines: string[];
   explorerUrl?: string;
@@ -77,6 +105,7 @@ export interface TelegramMessagePreview {
 
 export interface JudgeSnapshot {
   step: JudgeStepMeta;
+  provenance: ActiveProvenance;
   lensState: LensViewState;
   layout: LensPageLayout;
   validation: LensValidationResult;
@@ -87,9 +116,18 @@ export interface JudgeSnapshot {
   lastActionNote: string;
 }
 
+export const HL_FILL_TX_HASH =
+  '0x3be55891d105ce793d5f042ef3a61401040070776c08ed4bdfae03e49009a863';
+export const HL_FILL_EXPLORER_URL =
+  `https://app.hyperliquid-testnet.xyz/explorer/tx/${HL_FILL_TX_HASH}`;
+export const SEPOLIA_PAYOUT_20_HASH =
+  '0xc453a91d030307a604667169047689f8703f8cc98de4281c4a33fa5252d8178d';
+export const SEPOLIA_PAYOUT_20_URL =
+  `https://sepolia.etherscan.io/tx/${SEPOLIA_PAYOUT_20_HASH}`;
+
 /**
- * Fallback market prices captured from live public testnet/Coinbase endpoints so the
- * walkthrough renders immediately even before live browser fetches resolve or when offline.
+ * Fallback market prices captured from public testnet/Coinbase endpoints so the
+ * page still renders if public feeds are blocked or rate-limited.
  */
 export const RECORDED_FALLBACK_PRICES: LiveMarketPrices = {
   hlEth: 1684.5,
@@ -101,12 +139,14 @@ export const RECORDED_FALLBACK_PRICES: LiveMarketPrices = {
   coinbaseBtc: 60370.08,
   coinbaseEth: 1683.8,
   liveSources: [],
+  feedState: 'loading',
   updatedAt: null,
+  fallbackRecordedAt: '2026-11-27 00:05 UTC',
 };
 
 /**
- * Every testnet execution proof recorded from ChainVision's real verification runs on PR #6
- * (commit 12871f3). No private keys or secrets exist in this static bundle.
+ * Real testnet transactions and fills from ChainVision's verification runs on PR #6 (commit 12871f3).
+ * No private keys or secrets exist in this static bundle.
  */
 export const VERIFIED_PROOFS: readonly VerifiedProof[] = [
   {
@@ -114,7 +154,7 @@ export const VERIFIED_PROOFS: readonly VerifiedProof[] = [
     action: 'Aave v3 loan repay (5 USDC)',
     network: 'Ethereum Sepolia',
     recordedAt: '2026-11-25 06:28:36 UTC (block 12207803)',
-    details: 'verify:testnet — Aave v3 Pool repay(USDC), status ok',
+    details: 'verify:testnet — Aave v3 Pool repay(USDC), 4.923417 variable debt burned',
     txOrOrderId: '0x8b6b4210ac28750395a242f578369421183315906f18e2ab3ddf68e1f904ea0c',
     explorerUrl:
       'https://sepolia.etherscan.io/tx/0x8b6b4210ac28750395a242f578369421183315906f18e2ab3ddf68e1f904ea0c',
@@ -125,7 +165,7 @@ export const VERIFIED_PROOFS: readonly VerifiedProof[] = [
     action: 'Uniswap v3 swap (5 USDC -> 17.15 DAI)',
     network: 'Ethereum Sepolia',
     recordedAt: '2026-11-25 06:28:48 UTC (block 12207804)',
-    details: 'verify:testnet — SwapRouter02 exactInputSingle, status ok',
+    details: 'verify:testnet — SwapRouter02 exactInputSingle, 5 USDC -> 17.1513 DAI',
     txOrOrderId: '0x784a80d485cf97a27b84909f4290871b4a9e009b19612de3cbdde151ba6b0578',
     explorerUrl:
       'https://sepolia.etherscan.io/tx/0x784a80d485cf97a27b84909f4290871b4a9e009b19612de3cbdde151ba6b0578',
@@ -136,7 +176,7 @@ export const VERIFIED_PROOFS: readonly VerifiedProof[] = [
     action: 'Telegram /ask payout (2 USDC to Kit)',
     network: 'Ethereum Sepolia',
     recordedAt: '2026-11-25 06:29:00 UTC (block 12207805)',
-    details: 'verify:testnet — Aave Sepolia test USDC transfer after glasses tap',
+    details: 'verify:testnet — 2 Aave Sepolia test USDC transferred from 0x537B..fB0 to 0x1E57..Ce30',
     txOrOrderId: '0xa0dee5452b95d4fcfabeefb13947d8a1d25b10d067baea07608f219dde4b68be',
     explorerUrl:
       'https://sepolia.etherscan.io/tx/0xa0dee5452b95d4fcfabeefb13947d8a1d25b10d067baea07608f219dde4b68be',
@@ -147,21 +187,20 @@ export const VERIFIED_PROOFS: readonly VerifiedProof[] = [
     action: 'Telegram /ask payout (20 USDC to Kit)',
     network: 'Ethereum Sepolia',
     recordedAt: '2026-11-25 06:31:24 UTC (block 12207816)',
-    details: 'sim:demo — KIT ASKS 20 USDC - TAP: PAY confirmed in evenhub-simulator',
-    txOrOrderId: '0xc453a91d030307a604667169047689f8703f8cc98de4281c4a33fa5252d8178d',
-    explorerUrl:
-      'https://sepolia.etherscan.io/tx/0xc453a91d030307a604667169047689f8703f8cc98de4281c4a33fa5252d8178d',
+    details: 'sim:demo — dev-injected /ask 20 USDC in owner chat, tapped in simulator, 20 USDC to 0x1E57..Ce30',
+    txOrOrderId: SEPOLIA_PAYOUT_20_HASH,
+    explorerUrl: SEPOLIA_PAYOUT_20_URL,
     explorerLabel: 'Sepolia Etherscan',
   },
   {
     id: 'hl_trim',
-    action: 'Hyperliquid ETH-PERP reduce-only trim (50%)',
+    action: 'Hyperliquid ETH-PERP reduce-only IOC sell (0.0181 ETH @ $1,653.7)',
     network: 'Hyperliquid Testnet',
-    recordedAt: '2026-11-25 (sim:demo, PR #6)',
-    details: 'Non-withdrawable EIP-712 source:"b" agent; ETH size 0.0363 -> 0.0182 (IOC)',
-    txOrOrderId: '65942782652',
-    explorerUrl: 'https://app.hyperliquid-testnet.xyz/explorer',
-    explorerLabel: 'Hyperliquid Testnet Explorer',
+    recordedAt: '2026-11-25 06:31:07 UTC',
+    details: 'sim:demo — order 65942782652, position 0.0363 -> 0.0182 ETH via non-withdrawable source:"b" agent',
+    txOrOrderId: HL_FILL_TX_HASH,
+    explorerUrl: HL_FILL_EXPLORER_URL,
+    explorerLabel: 'Hyperliquid Testnet Explorer (tx)',
   },
 ];
 
@@ -172,12 +211,8 @@ export const JUDGE_STEPS: readonly JudgeStepMeta[] = [
     label: '1. Blank Lens',
     shortTitle: 'Blank until something needs you',
     track: 'Even G2 UX',
-    provenance: 'live_public',
-    provenanceLabel: 'LIVE SHARED RENDERER',
-    provenanceDetail:
-      'Rendered directly by @chainvision/shared renderLensPage({ mode: "idle" }). Zero lit characters keep G2 waveguides completely clear until a real threshold breaches or someone asks to be paid.',
     whatToTry:
-      'Verify the 0/1000 char layout badge below, try Swipe Up to peek at live public prices, or click Next Step.',
+      'Check the 0/1000 char validator bar below, click Swipe Up to peek at positions, or click Next Step.',
   },
   {
     id: 'exchange_margin',
@@ -185,12 +220,8 @@ export const JUDGE_STEPS: readonly JudgeStepMeta[] = [
     label: '2. Exchange Margin',
     shortTitle: 'Bybit low margin -> one-tap move',
     track: 'Track 03 · Exchanges',
-    provenance: 'sandbox_replay',
-    provenanceLabel: 'LIVE PUBLIC PRICES · SANDBOX TRANSFER REPLAY',
-    provenanceDetail:
-      'Bybit testnet and Coinbase BTC/ETH marks are fetched live from public endpoints. The signed Bybit V5 Funding -> Trading transfer is a recorded sandbox replay because no Bybit API keys live in this static page (and Bybit testnet keys are not yet provisioned).',
     whatToTry:
-      'Click Single Tap (Confirm) to move 500 USDT from Funding to Trading within the 500/action & 1,500/24h cap, or Swipe Down to dismiss.',
+      'Click Single Tap (Confirm) to preview the 500 USDT Funding -> Trading action (example only), or Swipe Down to dismiss.',
   },
   {
     id: 'hl_liq',
@@ -198,14 +229,8 @@ export const JUDGE_STEPS: readonly JudgeStepMeta[] = [
     label: '3. Hyperliquid Trim',
     shortTitle: 'Hyperliquid liq risk -> one-tap trim',
     track: 'Track 02 · Crypto & DeFi',
-    provenance: 'recorded_testnet',
-    provenanceLabel: 'RECORDED REAL TESTNET RUN + LIVE HL MARK',
-    provenanceDetail:
-      'ETH mark price streams live from Hyperliquid testnet /info (allMids). The one-tap reduce-only trim replays ChainVision’s real sim:demo testnet fill: order 65942782652 trimmed ETH-PERP from 0.0363 to 0.0182 via a non-withdrawable EIP-712 source:"b" agent.',
     whatToTry:
-      'Click Single Tap (Confirm) to execute the 50% reduce-only trim and inspect the recorded Hyperliquid testnet order receipt.',
-    proofUrl: 'https://app.hyperliquid-testnet.xyz/explorer',
-    proofLabel: 'Hyperliquid Testnet Explorer (Order 65942782652)',
+      'Inspect the example LIQ ~4m risk line, then click Single Tap (Confirm) to view the recorded real Hyperliquid testnet fill (order 65942782652).',
   },
   {
     id: 'telegram_request',
@@ -213,15 +238,8 @@ export const JUDGE_STEPS: readonly JudgeStepMeta[] = [
     label: '4. Telegram /ask',
     shortTitle: 'Telegram money request -> tap to pay',
     track: 'Best Telegram Integration',
-    provenance: 'recorded_testnet',
-    provenanceLabel: 'RECORDED REAL SEPOLIA RUN',
-    provenanceDetail:
-      'Replays the real sim:demo Sepolia payout recorded on 2026-11-25 (block 12207816): Kit sent /ask 20 USDC, and one tap on the glasses transferred 20 Sepolia test USDC to Kit’s pre-approved address with receipts to both chats.',
     whatToTry:
-      'Click Single Tap (Confirm) to pay 20 testnet USDC and open the Etherscan proof, or click Swipe Down to preview declining Kit politely.',
-    proofUrl:
-      'https://sepolia.etherscan.io/tx/0xc453a91d030307a604667169047689f8703f8cc98de4281c4a33fa5252d8178d',
-    proofLabel: 'Sepolia Etherscan tx 0xc453a91d..d8178d',
+      'Click Single Tap (Confirm) to replay the recorded 20 USDC Sepolia payout and open the Etherscan tx, or Swipe Down for an example decline.',
   },
   {
     id: 'voice_brief',
@@ -229,14 +247,41 @@ export const JUDGE_STEPS: readonly JudgeStepMeta[] = [
     label: '5. Voice Brief',
     shortTitle: '"What matters?" + two-venue voice check',
     track: 'Voice & Queue',
-    provenance: 'live_public',
-    provenanceLabel: 'LIVE SIGNAL QUEUE + LIVE PUBLIC FEEDS',
-    provenanceDetail:
-      'Ranks every unresolved signal with @chainvision/shared SignalQueue (money at risk soonest first, <= 3 lines, or NOTHING NEEDS YOU when clear). The bonus voice order card pulls live Binance Spot Testnet and Coinbase public BTC prices side by side.',
     whatToTry:
-      'See the ranked brief, click "Voice: Buy 0.001 BTC" to inspect the live two-venue confirm card, or click "Reset Queue" to replay the full 60-second loop.',
+      'See the ranked brief, click "Voice: Buy 0.001 BTC" to inspect the two-venue Binance/Coinbase confirm card, or click "Reset Queue".',
   },
 ];
+
+export function formatUtcTime(ts: number): string {
+  return new Date(ts).toISOString().slice(11, 19) + ' UTC';
+}
+
+/**
+ * Validates both Even G2 platform limits (validateLensLayout) AND the 60-character per-line
+ * ceiling across every rendered container so the judge page fails loudly if any line overflows.
+ */
+export function validateJudgeLensLayout(layout: LensPageLayout): LensValidationResult {
+  const base = validateLensLayout(layout);
+  const errors = [...base.errors];
+  for (const c of layout.textObject) {
+    for (const line of c.content.split('\n')) {
+      if (line.length > SIGNAL_LENS_LINE_MAX) {
+        errors.push(
+          `Container ${c.containerName} line exceeds ${SIGNAL_LENS_LINE_MAX} chars (${line.length}/${SIGNAL_LENS_LINE_MAX})`,
+        );
+      }
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+function priceContextNote(prices: LiveMarketPrices, venueName: string, price: number): string {
+  const formatted = price >= 1000 ? `$${price.toFixed(1)}` : `$${price.toFixed(2)}`;
+  if (prices.feedState === 'live' && prices.liveSources.includes(venueName) && prices.updatedAt !== null) {
+    return `${venueName} mark ${formatted} (live public data, ${formatUtcTime(prices.updatedAt)})`;
+  }
+  return `${venueName} mark ${formatted} (last recorded ${prices.fallbackRecordedAt}; live feed unavailable)`;
+}
 
 function buildSnapshots(prices: LiveMarketPrices, trimmedHl: boolean, movedBybit: boolean): ProtocolSnapshots {
   const hlSize = trimmedHl ? 0.0182 : 0.0363;
@@ -382,7 +427,7 @@ function makeExchangeMarginSignal(prices: LiveMarketPrices, now: number): Signal
 
 function makeHyperliquidSignal(prices: LiveMarketPrices, now: number): Signal {
   const liqPx = prices.hlEth * 0.94;
-  // Two-minute mark drawdown moving toward liquidation (~1.5% / min -> ~4m ETA at 6.0% away).
+  // Scripted 2-minute drawdown example (~1.5%/min -> ~4m ETA at 6.0% away).
   const etaMinutes = estimateLiquidationEtaMinutes({
     side: 'LONG',
     markPx: prices.hlEth,
@@ -492,7 +537,6 @@ export class JudgeWalkthrough {
 
   updatePrices(next: Partial<LiveMarketPrices>): JudgeSnapshot {
     this.prices = { ...this.prices, ...next };
-    // Refresh live snapshots / active signal prices without losing receipts
     if (this.lensState.mode === 'signal' && this.stepId === 'exchange_margin') {
       this.lensState = {
         ...this.lensState,
@@ -505,6 +549,7 @@ export class JudgeWalkthrough {
         signal: makeHyperliquidSignal(this.prices, this.nowFn()),
         snapshots: this.snapshots(),
       };
+      this.lastActionNote = `Example liquidation scenario using ${priceContextNote(this.prices, 'Hyperliquid Testnet', this.prices.hlEth)}. Tap to replay recorded order 65942782652.`;
     } else if (this.lensState.mode === 'confirm' && this.lensState.pendingAction?.actionType === 'binance_limit') {
       this.lensState = {
         ...this.lensState,
@@ -565,7 +610,7 @@ export class JudgeWalkthrough {
         queueSize: this.buildQueue(now).size,
       };
       this.lastActionNote =
-        'Bybit Trading margin dropped below 250 USDT free. Single tap moves 500 USDT Funding -> Trading.';
+        'Example Track 03 margin alert: single tap previews a 500 USDT Funding -> Trading move (no Bybit key in this page).';
     } else if (id === 'hl_liq') {
       const sig = makeHyperliquidSignal(this.prices, now);
       this.lensState = {
@@ -576,7 +621,7 @@ export class JudgeWalkthrough {
         snapshots,
         queueSize: this.buildQueue(now).size,
       };
-      this.lastActionNote = `Hyperliquid ETH-PERP long is 6.0% from liquidation (live mark $${this.prices.hlEth.toFixed(1)}). Single tap trims 50% reduce-only.`;
+      this.lastActionNote = `Example liquidation scenario using ${priceContextNote(this.prices, 'Hyperliquid Testnet', this.prices.hlEth)}. Tap to replay recorded order 65942782652.`;
     } else if (id === 'telegram_request') {
       const sig = makeTelegramRequestSignal(now);
       this.lensState = {
@@ -588,7 +633,7 @@ export class JudgeWalkthrough {
         queueSize: this.buildQueue(now).size,
       };
       this.lastActionNote =
-        'Approved requester Kit sent /ask 20 USDC in Telegram. Single tap pays from the capped Sepolia wallet; swipe down declines.';
+        'Recorded from sim:demo (block 12207816): dev-injected /ask 20 USDC in the owner chat. Single tap replays the real Sepolia payout; swipe down previews a decline.';
     } else {
       const queue = this.buildQueue(now);
       const ranked = queue.ranked(now).slice(0, BRIEF_MAX_LINES).map((s) => s.line);
@@ -626,17 +671,17 @@ export class JudgeWalkthrough {
       if (action.actionType === 'bybit_transfer') {
         this.resolved.add('exchange_margin');
         const receipt: ExecutionReceipt = {
-          id: 'rcpt_bybit_sandbox',
+          id: 'rcpt_bybit_example',
           actionId: action.id,
           protocol: 'bybit',
           actionType: 'bybit_transfer',
           network: 'bybit-testnet',
           summary: 'BYBIT MOVE 500 USDT FUNDING TO TRADING',
-          beforeFact: 'TRADING FREE $182.40 · FUNDING 1200',
-          afterFact: 'TRADING FREE $682.40 · FUNDING 700',
-          txHashOrOrderId: 'sandbox-replay-no-key',
+          beforeFact: 'FREE $182 · FUND 1200',
+          afterFact: 'FREE $682 · FUND 700',
+          txHashOrOrderId: 'example-no-key',
           explorerUrl: 'https://testnet.bybit.com',
-          telegramPosted: true,
+          telegramPosted: false,
           timestamp: now,
         };
         this.lensState = {
@@ -646,22 +691,9 @@ export class JudgeWalkthrough {
           lastReceipt: receipt,
           snapshots: this.snapshots(),
         };
-        this.telegramMessages = [
-          {
-            recipient: 'Wearer',
-            title: 'ChainVision Sandbox Receipt (Bybit Testnet Replay)',
-            lines: [
-              'BYBIT MOVE 500 USDT FUNDING TO TRADING',
-              'Before: TRADING FREE $182.40 · FUNDING 1200 USDT',
-              'After: TRADING FREE $682.40 · FUNDING 700 USDT',
-              'Caps enforced: 500/action · 1,500/24h (sandbox replay, no keys in browser)',
-            ],
-            explorerUrl: 'https://testnet.bybit.com',
-            explorerLabel: 'Bybit Testnet',
-          },
-        ];
+        this.telegramMessages = [];
         this.lastActionNote =
-          'Confirmed by single tap (sandbox replay — no Bybit key in static bundle). Telegram receipt posted.';
+          'Example action confirmed locally (no Bybit testnet key in this page; no Telegram message was sent).';
         return this.snapshot();
       }
 
@@ -673,11 +705,11 @@ export class JudgeWalkthrough {
           protocol: 'hyperliquid',
           actionType: 'hl_trim',
           network: 'hyperliquid-testnet',
-          summary: 'TRIM 50% ETH (REDUCE-ONLY IOC)',
+          summary: 'TRIM 0.0181 ETH @ $1653.7 (IOC)',
           beforeFact: 'SZ 0.0363 ETH',
           afterFact: 'SZ 0.0182 ETH',
           txHashOrOrderId: '65942782652',
-          explorerUrl: 'https://app.hyperliquid-testnet.xyz/explorer',
+          explorerUrl: HL_FILL_EXPLORER_URL,
           telegramPosted: true,
           timestamp: now,
         };
@@ -690,26 +722,24 @@ export class JudgeWalkthrough {
         };
         this.telegramMessages = [
           {
-            recipient: 'Wearer',
-            title: 'ChainVision Testnet Receipt (Recorded Real Run)',
+            recipient: 'Wearer (Owner Chat)',
+            title: 'Recorded Testnet Receipt (sim:demo, 2026-11-25 06:31:07 UTC)',
             lines: [
-              'Hyperliquid Testnet · Reduce-Only IOC Trim (50% ETH)',
-              'Position size: 0.0363 -> 0.0182 ETH (non-withdrawable source:"b" agent)',
-              'Order ID: 65942782652 (recorded from PR #6 sim:demo)',
+              'Hyperliquid Testnet · Reduce-Only IOC sell 0.0181 ETH @ $1,653.7',
+              'Position: 0.0363 -> 0.0182 ETH (non-withdrawable source:"b" agent)',
+              `Order ID: 65942782652 · Tx: ${HL_FILL_TX_HASH}`,
             ],
-            explorerUrl: 'https://app.hyperliquid-testnet.xyz/explorer',
-            explorerLabel: 'Open Hyperliquid Testnet Explorer',
+            explorerUrl: HL_FILL_EXPLORER_URL,
+            explorerLabel: 'Open Hyperliquid Testnet Fill Tx',
           },
         ];
         this.lastActionNote =
-          'Confirmed by single tap: replays real Hyperliquid testnet reduce-only order 65942782652 (0.0363 -> 0.0182 ETH).';
+          'Replays recorded real Hyperliquid testnet fill: order 65942782652 sold 0.0181 ETH @ $1,653.7 (0.0363 -> 0.0182 ETH) on 2026-11-25 06:31:07 UTC.';
         return this.snapshot();
       }
 
       if (action.actionType === 'usdc_payout') {
         this.resolved.add('telegram_request');
-        const txHash = '0xc453a91d030307a604667169047689f8703f8cc98de4281c4a33fa5252d8178d';
-        const explorerUrl = `https://sepolia.etherscan.io/tx/${txHash}`;
         const receipt: ExecutionReceipt = {
           id: 'rcpt_sepolia_usdc20',
           actionId: action.id,
@@ -719,8 +749,8 @@ export class JudgeWalkthrough {
           summary: 'PAID 20 USDC TO KIT',
           beforeFact: 'WALLET 500.00 USDC',
           afterFact: 'WALLET 480.00 USDC',
-          txHashOrOrderId: txHash,
-          explorerUrl,
+          txHashOrOrderId: SEPOLIA_PAYOUT_20_HASH,
+          explorerUrl: SEPOLIA_PAYOUT_20_URL,
           telegramPosted: true,
           timestamp: now,
         };
@@ -733,30 +763,20 @@ export class JudgeWalkthrough {
         };
         this.telegramMessages = [
           {
-            recipient: 'Wearer',
-            title: 'ChainVision Testnet Receipt (Recorded Real Sepolia Tx)',
+            recipient: 'Wearer (Owner Chat)',
+            title: 'Recorded Testnet Receipt (sim:demo, single owner chat)',
             lines: [
-              'PAID 20 USDC TO KIT (Sepolia test USDC 0x94a9..E4C8)',
+              'PAID 20 USDC TO KIT (Sepolia test USDC 0x94a9..E4C8 -> 0x1E57..Ce30)',
               'Block 12207816 · 2026-11-25 06:31:24 UTC',
-              `Tx: ${txHash}`,
+              `Tx: ${SEPOLIA_PAYOUT_20_HASH}`,
+              'Note: sim:demo injected /ask into the owner chat; a second Telegram account enables two-chat delivery.',
             ],
-            explorerUrl,
-            explorerLabel: 'View on Sepolia Etherscan',
-          },
-          {
-            recipient: 'Kit (Requester)',
-            title: 'Payment Received from Wearer',
-            lines: [
-              'The wearer paid your request: 20 USDC on Sepolia testnet',
-              'To: 0x1E570D5BAfE30Bd6a0980d3f786d7492E1D4Ce30',
-              'Testnet only · Not financial advice',
-            ],
-            explorerUrl,
+            explorerUrl: SEPOLIA_PAYOUT_20_URL,
             explorerLabel: 'View on Sepolia Etherscan',
           },
         ];
         this.lastActionNote =
-          'Confirmed by single tap: replays real Sepolia payout tx 0xc453a91d..d8178d (20 USDC to Kit) with dual Telegram receipts.';
+          'Replays recorded real Sepolia payout tx 0xc453a91d..d8178d (20 USDC to 0x1E57..Ce30, block 12207816).';
         return this.snapshot();
       }
     }
@@ -764,17 +784,17 @@ export class JudgeWalkthrough {
     if (this.lensState.mode === 'confirm' && this.lensState.pendingAction?.actionType === 'binance_limit') {
       const a = this.lensState.pendingAction;
       const receipt: ExecutionReceipt = {
-        id: 'rcpt_binance_sandbox',
+        id: 'rcpt_binance_example',
         actionId: a.id,
         protocol: 'binance',
         actionType: 'binance_limit',
         network: 'binance-spot-testnet',
-        summary: `BINANCE TESTNET LIMIT BUY ${a.params.qty} BTC @ ${a.params.price}`,
+        summary: `BINANCE LIMIT BUY ${a.params.qty} BTC @ ${a.params.price}`,
         beforeFact: 'FREE 1200 USDT',
-        afterFact: 'ORDER NEW (SANDBOX REPLAY)',
-        txHashOrOrderId: 'sandbox-replay-no-key',
+        afterFact: 'EXAMPLE ORDER (NO KEY)',
+        txHashOrOrderId: 'example-no-key',
         explorerUrl: 'https://testnet.binance.vision',
-        telegramPosted: true,
+        telegramPosted: false,
         timestamp: now,
       };
       this.lensState = {
@@ -784,21 +804,9 @@ export class JudgeWalkthrough {
         lastReceipt: receipt,
         snapshots: this.snapshots(),
       };
-      this.telegramMessages = [
-        {
-          recipient: 'Wearer',
-          title: 'ChainVision Sandbox Receipt (Binance Spot Testnet)',
-          lines: [
-            receipt.summary,
-            `Prices checked: ${a.comparisonLine ?? 'N/A'}`,
-            'Sandbox replay: live public prices, no Binance API key in static page.',
-          ],
-          explorerUrl: 'https://testnet.binance.vision',
-          explorerLabel: 'Binance Spot Testnet',
-        },
-      ];
+      this.telegramMessages = [];
       this.lastActionNote =
-        'Two-venue voice limit order confirmed (sandbox replay with live Binance Testnet + Coinbase prices).';
+        'Example order confirmed locally (no Binance testnet key in this page; no Telegram message was sent).';
       return this.snapshot();
     }
 
@@ -816,22 +824,15 @@ export class JudgeWalkthrough {
   swipeDown(): JudgeSnapshot {
     if (this.lensState.mode === 'signal' && this.stepId === 'telegram_request') {
       this.resolved.add('telegram_request');
-      this.telegramMessages = [
-        {
-          recipient: 'Kit (Requester)',
-          title: 'Request Declined',
-          lines: [
-            'The wearer declined your request for 20 USDC this time. No funds moved.',
-          ],
-        },
-      ];
+      this.telegramMessages = [];
       this.lensState = {
         mode: 'idle',
         paired: true,
         pairingCode: '482915',
         snapshots: this.snapshots(),
       };
-      this.lastActionNote = 'Swiped down: declined Kit’s 20 USDC request politely; lens returned to blank.';
+      this.lastActionNote =
+        'Example swipe-down decline: Kit would be notified that no funds moved (no Telegram message sent in this static page).';
       return this.snapshot();
     }
 
@@ -855,8 +856,13 @@ export class JudgeWalkthrough {
       snapshots: this.snapshots(),
       positionPageIndex: nextIdx,
     };
-    const names = ['Aave v3 Sepolia', 'Hyperliquid Testnet', 'Uniswap v3 Sepolia', 'Exchanges (Bybit / Binance / Coinbase)'];
-    this.lastActionNote = `Swiped up: viewing live protocol snapshot ${nextIdx + 1}/4 (${names[nextIdx]}).`;
+    const names = [
+      'Aave v3 Sepolia',
+      'Hyperliquid Testnet',
+      'Uniswap v3 Sepolia',
+      'Exchanges (Bybit / Binance / Coinbase)',
+    ];
+    this.lastActionNote = `Swiped up: viewing protocol snapshot ${nextIdx + 1}/4 (${names[nextIdx]}).`;
     return this.snapshot();
   }
 
@@ -875,7 +881,14 @@ export class JudgeWalkthrough {
       pendingAction: action,
       snapshots: this.snapshots(),
     };
-    this.lastActionNote = `Voice command "buy 0.001 BTC at ${action.params.price}": live two-venue check (${action.comparisonLine}). Tap confirms; swipe down cancels.`;
+    const pricesFresh =
+      this.prices.feedState === 'live' &&
+      this.prices.updatedAt !== null &&
+      this.prices.liveSources.includes('Binance Testnet') &&
+      this.prices.liveSources.includes('Coinbase Public');
+    this.lastActionNote = pricesFresh
+      ? `Voice command "buy 0.001 BTC at ${action.params.price}" with live public prices (${formatUtcTime(this.prices.updatedAt!)}): ${action.comparisonLine}.`
+      : `Voice command "buy 0.001 BTC at ${action.params.price}" using last recorded public prices (${this.prices.fallbackRecordedAt}): ${action.comparisonLine}.`;
     return this.snapshot();
   }
 
@@ -886,10 +899,125 @@ export class JudgeWalkthrough {
     return this.selectStep('blank');
   }
 
+  private resolveProvenance(): ActiveProvenance {
+    const p = this.prices;
+    const liveAt = p.feedState === 'live' && p.updatedAt !== null ? formatUtcTime(p.updatedAt) : null;
+
+    if (this.lensState.mode === 'positions') {
+      if (liveAt && p.liveSources.length > 0) {
+        return {
+          kind: 'live',
+          badgeText: `${PROVENANCE_DEFINITIONS.live.label} · ${liveAt}`,
+          detail: `Public mark prices fetched live (${p.liveSources.join(', ')}) at ${liveAt}; account balances shown are example testnet figures.`,
+        };
+      }
+      return {
+        kind: 'example',
+        badgeText: PROVENANCE_DEFINITIONS.example.label,
+        detail: `Example protocol snapshots using last recorded public prices (${p.fallbackRecordedAt}; live feeds unavailable).`,
+      };
+    }
+
+    if (this.stepId === 'blank') {
+      return {
+        kind: 'example',
+        badgeText: PROVENANCE_DEFINITIONS.example.label,
+        detail:
+          'Rendered directly by @chainvision/shared renderLensPage({ mode: "idle" }). Zero lit characters keep Even G2 waveguides clear until a risk threshold breaches or someone asks to be paid.',
+      };
+    }
+
+    if (this.stepId === 'exchange_margin') {
+      const priceNote = priceContextNote(p, 'Bybit Testnet', p.bybitBtc);
+      return {
+        kind: 'example',
+        badgeText: PROVENANCE_DEFINITIONS.example.label,
+        detail:
+          `Example of the Track 03 margin alert and one-tap Funding -> Trading transfer (${priceNote}). No Bybit write has run yet; signed Bybit and Binance actions run on testnet once keys are supplied.`,
+      };
+    }
+
+    if (this.stepId === 'hl_liq') {
+      if (this.lensState.mode === 'result' && this.lensState.lastReceipt?.protocol === 'hyperliquid') {
+        return {
+          kind: 'recorded',
+          badgeText: PROVENANCE_DEFINITIONS.recorded.label,
+          detail:
+            'Recorded from ChainVision’s 2026-11-25 06:31:07 UTC Hyperliquid testnet run (order 65942782652): reduce-only IOC sell of 0.0181 ETH at $1,653.7, moving ETH-PERP from 0.0363 to 0.0182 via a non-withdrawable source:"b" agent.',
+          proofUrl: HL_FILL_EXPLORER_URL,
+          proofLabel: 'Hyperliquid Testnet Explorer tx 0x3be55891..9a863 (Order 65942782652)',
+        };
+      }
+      const priceNote = priceContextNote(p, 'Hyperliquid Testnet', p.hlEth);
+      return {
+        kind: 'example',
+        badgeText: PROVENANCE_DEFINITIONS.example.label,
+        detail:
+          `Example liquidation risk line (6.0% distance and ~4m ETA come from scripted drawdown samples; the ETA has not run against a live position yet) shown alongside ${priceNote}. Tap to replay the recorded real Hyperliquid testnet fill (order 65942782652).`,
+      };
+    }
+
+    if (this.stepId === 'telegram_request') {
+      if (this.lensState.mode === 'idle') {
+        return {
+          kind: 'example',
+          badgeText: PROVENANCE_DEFINITIONS.example.label,
+          detail:
+            'Example of swiping down to decline a money request without moving funds. Return to Step 4 to inspect the recorded 20 USDC Sepolia payout.',
+        };
+      }
+      return {
+        kind: 'recorded',
+        badgeText: PROVENANCE_DEFINITIONS.recorded.label,
+        detail:
+          'Recorded from ChainVision’s 2026-11-25 sim:demo run (Sepolia block 12207816, 06:31:24 UTC). In that run, /ask 20 USDC was injected through /api/dev/telegram-update into the owner’s single Telegram chat, and one tap in evenhub-simulator transferred 20 Sepolia test USDC from 0x537B..fB0 to 0x1E57..Ce30. With a second Telegram account, both chats receive receipts.',
+        proofUrl: SEPOLIA_PAYOUT_20_URL,
+        proofLabel: 'Sepolia Etherscan tx 0xc453a91d..d8178d',
+      };
+    }
+
+    // Step 5: voice_brief (brief or two-venue Binance voice confirm card)
+    if (this.lensState.mode === 'confirm' && this.lensState.pendingAction?.actionType === 'binance_limit') {
+      const bothLive =
+        liveAt !== null &&
+        p.liveSources.includes('Binance Testnet') &&
+        p.liveSources.includes('Coinbase Public');
+      if (bothLive) {
+        return {
+          kind: 'live',
+          badgeText: `${PROVENANCE_DEFINITIONS.live.label} · ${liveAt}`,
+          detail: `Two-venue confirm card built from live public Binance Spot Testnet and Coinbase BTC prices fetched at ${liveAt}. Tapping previews an example local receipt because no Binance API key is in this page.`,
+        };
+      }
+      return {
+        kind: 'example',
+        badgeText: PROVENANCE_DEFINITIONS.example.label,
+        detail: `Example two-venue confirm card using last recorded Binance Testnet and Coinbase BTC prices (${p.fallbackRecordedAt}; live feeds unavailable). Signed Binance limit orders run on testnet once keys are supplied.`,
+      };
+    }
+
+    if (this.lensState.mode === 'result' && this.lensState.lastReceipt?.protocol === 'binance') {
+      return {
+        kind: 'example',
+        badgeText: PROVENANCE_DEFINITIONS.example.label,
+        detail:
+          'Example local receipt for a Binance Spot Testnet voice limit order. No Binance write ran and no Telegram message was sent; signed Binance orders run on testnet once keys are supplied.',
+      };
+    }
+
+    return {
+      kind: 'example',
+      badgeText: PROVENANCE_DEFINITIONS.example.label,
+      detail:
+        'Ranks remaining open queue items with @chainvision/shared SignalQueue (money at risk soonest first, <= 3 lines, or NOTHING NEEDS YOU when clear). Click "Voice: Buy 0.001 BTC" to compare Binance Spot Testnet and Coinbase prices.',
+    };
+  }
+
   snapshot(): JudgeSnapshot {
     const layout = renderLensPage(this.lensState);
-    const validation = validateLensLayout(layout);
+    const validation = validateJudgeLensLayout(layout);
     const step = JUDGE_STEPS.find((s) => s.id === this.stepId) ?? JUDGE_STEPS[0]!;
+    const provenance = this.resolveProvenance();
     const lensLineLength =
       this.lensState.mode === 'signal' && this.lensState.signal
         ? signalLensLine(this.lensState.signal).length
@@ -897,6 +1025,7 @@ export class JudgeWalkthrough {
 
     return {
       step,
+      provenance,
       lensState: this.lensState,
       layout,
       validation,
@@ -924,11 +1053,18 @@ export function validateAllJudgeSteps(prices: LiveMarketPrices = RECORDED_FALLBA
     if (!snap.validation.valid) {
       errors.push(`${label}: ${snap.validation.errors.join('; ')}`);
     }
-    if (snap.lensState.mode === 'signal' && snap.lensState.signal) {
-      const line = signalLensLine(snap.lensState.signal);
-      if (line.length > SIGNAL_LENS_LINE_MAX) {
-        errors.push(`${label}: signal line exceeds ${SIGNAL_LENS_LINE_MAX} chars (${line.length})`);
+    if (snap.lensLineLength > SIGNAL_LENS_LINE_MAX) {
+      errors.push(`${label}: max line exceeds ${SIGNAL_LENS_LINE_MAX} chars (${snap.lensLineLength})`);
+    }
+    if (snap.provenance.kind === 'recorded') {
+      if (!snap.provenance.proofUrl || !snap.provenance.proofUrl.startsWith('https://')) {
+        errors.push(`${label}: recorded state is missing a proofUrl`);
+      } else if (/\/explorer\/?$/.test(snap.provenance.proofUrl)) {
+        errors.push(`${label}: recorded state proofUrl points to explorer home page (${snap.provenance.proofUrl})`);
       }
+    }
+    if (snap.provenance.kind === 'example' && snap.lensState.mode === 'result' && snap.lensState.lastReceipt?.telegramPosted) {
+      errors.push(`${label}: example receipt must not set telegramPosted=true`);
     }
   };
 

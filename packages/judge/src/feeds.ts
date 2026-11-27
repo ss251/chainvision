@@ -24,7 +24,8 @@ function posNum(v: unknown): number | null {
  * - Binance Spot Testnet public ticker/price
  * - Bybit Testnet public linear tickers
  *
- * Any unreachable endpoint falls back cleanly to the recorded fallback price without throwing.
+ * When endpoints are blocked or rate-limited, falls back to the last recorded prices
+ * and sets feedState='unavailable' so the UI never claims stale prices are live.
  */
 export async function fetchLivePublicPrices(
   previous: LiveMarketPrices = RECORDED_FALLBACK_PRICES,
@@ -111,7 +112,11 @@ export async function fetchLivePublicPrices(
   if (byOk) next.liveSources.push('Bybit Testnet');
 
   if (next.liveSources.length > 0) {
+    next.feedState = 'live';
     next.updatedAt = Date.now();
+  } else {
+    next.feedState = 'unavailable';
+    next.updatedAt = null;
   }
   return next;
 }

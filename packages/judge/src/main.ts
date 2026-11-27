@@ -4,7 +4,9 @@ import { fetchLivePublicPrices } from './feeds.js';
 import {
   JUDGE_STEPS,
   JudgeWalkthrough,
+  PROVENANCE_DEFINITIONS,
   VERIFIED_PROOFS,
+  formatUtcTime,
   type JudgeSnapshot,
   type JudgeStepId,
   type ProvenanceKind,
@@ -32,9 +34,9 @@ function shortId(id: string): string {
 }
 
 function badgeClass(kind: ProvenanceKind): string {
-  if (kind === 'recorded_testnet') return 'badge badge-recorded';
-  if (kind === 'sandbox_replay') return 'badge badge-sandbox';
-  return 'badge badge-live';
+  if (kind === 'recorded') return 'badge badge-recorded';
+  if (kind === 'live') return 'badge badge-live';
+  return 'badge badge-sandbox';
 }
 
 function greenFor4Bit(level: number): string {
@@ -71,10 +73,24 @@ function renderLensContainers(snap: JudgeSnapshot): string {
 
 function render(snap: JudgeSnapshot): void {
   const prices = walkthrough.getPrices();
-  const isLive = prices.liveSources.length > 0;
+  const isLive = prices.feedState === 'live' && prices.liveSources.length > 0 && prices.updatedAt !== null;
+  const dotClass = isLive ? 'dot live' : prices.feedState === 'unavailable' ? 'dot stale' : 'dot';
   const feedLabel = isLive
-    ? `Live public feeds (${prices.liveSources.join(', ')})`
-    : 'Recorded public price snapshot (connecting to live feeds...)';
+    ? `${PROVENANCE_DEFINITIONS.live.label} · ${formatUtcTime(prices.updatedAt!)} (${prices.liveSources.join(', ')})`
+    : prices.feedState === 'unavailable'
+      ? `Last recorded public prices (${prices.fallbackRecordedAt}) · live feeds unavailable`
+      : `Last recorded public prices (${prices.fallbackRecordedAt}) · loading live feeds...`;
+
+  const legendHtml = (['recorded', 'live', 'example'] as const)
+    .map(
+      (kind) => `
+      <div class="legend-item">
+        <span class="${badgeClass(kind)}">${escapeHtml(PROVENANCE_DEFINITIONS[kind].label)}</span>
+        <p>${escapeHtml(PROVENANCE_DEFINITIONS[kind].description)}</p>
+      </div>
+    `,
+    )
+    .join('');
 
   const stepsHtml = JUDGE_STEPS.map((s) => {
     const active = s.id === snap.step.id ? ' active' : '';
@@ -105,7 +121,7 @@ function render(snap: JudgeSnapshot): void {
       `,
         )
         .join('')
-    : '<p class="tg-empty">No Telegram receipt sent in this step yet. Tap a signal to see the bot receipt preview.</p>';
+    : '<p class="tg-empty">No Telegram message sent on this step. Recorded testnet steps show their recorded receipt after tapping.</p>';
 
   const proofsRows = VERIFIED_PROOFS.map(
     (p) => `
@@ -125,21 +141,25 @@ function render(snap: JudgeSnapshot): void {
     <main class="page">
       <header class="header">
         <div>
-          <p class="eyebrow">Even Realities G2 · Zero-Key 60-Second Judge Walkthrough</p>
+          <p class="eyebrow">Even Realities G2 · No-Key 60-Second Judge Walkthrough</p>
           <h1>ChainVision</h1>
           <p class="subtitle">
             Blank until real risk breaches or a contact asks to be paid, then one ranked line resolved in one tap.
-            Runs on live public read-only price feeds and recorded real testnet proofs — zero API keys, zero install.
+            Runs from the repository with one command — no API keys required.
           </p>
         </div>
         <div class="safety-pill">
           <strong>Testnet only · Non-custodial · No secrets</strong>
-          No mainnet keys or financial advice. Every lens frame below is built by the real <code>@chainvision/shared</code> renderer and checked by <code>validateLensLayout()</code>.
+          No mainnet keys or financial advice. Every lens frame below is rendered by <code>@chainvision/shared</code> and checked against G2 limits and the 60-character line ceiling.
         </div>
       </header>
 
-      <section class="feed-strip" aria-label="Live public market feeds">
-        <span class="feed-status"><span class="dot${isLive ? ' live' : ''}"></span>${escapeHtml(feedLabel)}</span>
+      <section class="legend-strip" aria-label="Provenance label definitions">
+        ${legendHtml}
+      </section>
+
+      <section class="feed-strip" aria-label="Public market feeds">
+        <span class="feed-status"><span class="${dotClass}"></span>${escapeHtml(feedLabel)}</span>
         <span class="feed-item">HL ETH <b>${fmtUsd(prices.hlEth)}</b></span>
         <span class="feed-item">Bybit BTC <b>${fmtUsd(prices.bybitBtc)}</b></span>
         <span class="feed-item">Binance Testnet BTC <b>${fmtUsd(prices.binanceBtc)}</b></span>
@@ -166,7 +186,7 @@ function render(snap: JudgeSnapshot): void {
 
           <div class="validator-bar">
             <span class="${snap.validation.valid ? 'validator-ok' : 'validator-err'}">
-              ${snap.validation.valid ? 'LAYOUT VALID' : 'INVALID: ' + escapeHtml(snap.validation.errors.join(', '))}
+              ${snap.validation.valid ? 'LAYOUT VALID' : 'LAYOUT INVALID: ' + escapeHtml(snap.validation.errors.join('; '))}
             </span>
             <span>${snap.litChars}/1000 chars · ${snap.layout.containerTotalNum}/12 containers · max line ${snap.lensLineLength}/60</span>
           </div>
@@ -188,9 +208,9 @@ function render(snap: JudgeSnapshot): void {
         </div>
 
         <aside class="info-card">
-          <span class="${badgeClass(snap.step.provenance)}">${escapeHtml(snap.step.provenanceLabel)}</span>
+          <span class="${badgeClass(snap.provenance.kind)}" data-provenance="${snap.provenance.kind}">${escapeHtml(snap.provenance.badgeText)}</span>
           <h2>${escapeHtml(snap.step.shortTitle)}</h2>
-          <p>${escapeHtml(snap.step.provenanceDetail)}</p>
+          <p>${escapeHtml(snap.provenance.detail)}</p>
 
           <div class="try-box">
             <strong>Try on this step</strong>
@@ -198,26 +218,27 @@ function render(snap: JudgeSnapshot): void {
           </div>
 
           ${
-            snap.step.proofUrl
+            snap.provenance.proofUrl
               ? `<div class="proof-link-box">
                   <span>Explorer Proof</span>
-                  <a href="${escapeHtml(snap.step.proofUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(snap.step.proofLabel ?? 'Open Explorer')} -></a>
+                  <a href="${escapeHtml(snap.provenance.proofUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(snap.provenance.proofLabel ?? 'Open Explorer')} -></a>
                 </div>`
               : ''
           }
 
           <div class="tg-section">
-            <h3 class="tg-heading">Telegram Bot Receipt Preview</h3>
+            <h3 class="tg-heading">Telegram Bot Receipt</h3>
             ${telegramHtml}
           </div>
         </aside>
       </section>
 
-      <section class="proofs-panel" aria-label="Verified testnet proofs">
-        <h3>Verified Testnet Execution Proofs (Real Runs, Clickable Explorers)</h3>
+      <section class="proofs-panel" aria-label="Recorded testnet proofs">
+        <h3>Recorded Testnet Proofs (PR #6, commit <code>12871f3</code>)</h3>
         <p class="sub">
-          Every on-chain and Hyperliquid proof below comes from ChainVision's real verification runs on PR #6 (commit <code>12871f3</code>).
-          Exchange signed actions (Bybit / Binance) and TON payouts await testnet keys/faucet coins from the project owner and are clearly labeled above.
+          Sepolia transactions were checked against Sepolia on-chain data (block, timestamp, method, and token transfers match).
+          The Hyperliquid fill matches order <code>65942782652</code> (reduce-only IOC sell of <code>0.0181 ETH</code> at <code>$1,653.7</code>, <code>2026-11-25 06:31:07 UTC</code>, position <code>0.0363 -> 0.0182</code>) and links directly to the fill transaction in the Hyperliquid Testnet Explorer SPA.
+          Signed Bybit/Binance writes and TON payouts await testnet keys and faucet coins from the owner.
         </p>
         <div class="table-wrap">
           <table>
@@ -226,7 +247,7 @@ function render(snap: JudgeSnapshot): void {
                 <th>Action</th>
                 <th>Network</th>
                 <th>Recorded</th>
-                <th>Explorer Proof</th>
+                <th>Explorer Link</th>
               </tr>
             </thead>
             <tbody>

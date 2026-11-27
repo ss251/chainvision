@@ -288,8 +288,13 @@ export function createServer() {
         return;
       }
 
-      // Serve zero-key 60-second judge walkthrough at /judge
-      if (req.method === 'GET' && (url.pathname === '/judge' || url.pathname.startsWith('/judge/'))) {
+      // Serve zero-key 60-second judge walkthrough at /judge/ (redirect /judge -> /judge/ so relative ./assets/ resolve)
+      if (req.method === 'GET' && url.pathname === '/judge') {
+        res.writeHead(302, { location: `/judge/${url.search}` });
+        res.end();
+        return;
+      }
+      if (req.method === 'GET' && url.pathname.startsWith('/judge/')) {
         const rel = url.pathname.replace(/^\/judge\/?/, '') || 'index.html';
         const candidate = path.join(judgeDist, rel);
         const safePath = candidate.startsWith(judgeDist) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()
