@@ -5,6 +5,22 @@
 > **Testnet only · Non-custodial · Not financial advice.**  
 > ChainVision runs exclusively on **Ethereum Sepolia**, **Hyperliquid / Bybit / Binance Testnets** and **TON testnet**, plus two reads that need no account and move nothing: Coinbase public market data, and (optionally) the balance of your own TON mainnet wallet address. It never holds user funds, never asks for a mainnet private key, never gives financial advice, and never executes a transaction without an explicit single-tap confirmation on the glasses.
 
+> **For Judges (60-second evaluation, no API keys):** read [JUDGES.md](./JUDGES.md), run `npm run dev:judge` from the repository (or deploy `packages/judge/dist` as a static site) to click through the exact `576 × 288` Even G2 lens with no keys, and build the validated `.ehpk` package with `npm run pack:ehpk`.
+
+## Verified Testnet Proofs
+
+Real testnet executions recorded from ChainVision's `verify:testnet` and `sim:demo` (`evenhub-simulator@0.9.5`) runs on PR #6 (`12871f3`). The four Sepolia transactions were checked against Sepolia on-chain data (block, timestamp, method, and token transfers match). The Hyperliquid link opens the testnet account's explorer page (`0x1449…5182`), which lists the `2026-11-25 06:31:07 UTC` Place order transaction (`0x3be5…a863`, block `787719700`); fill size and price (`0.0181 ETH @ $1,653.7`, position `0.0363 -> 0.0182`, order `65942782652`) come from the public Hyperliquid testnet API:
+
+| Action | Network | Recorded Run | Explorer Proof |
+| --- | --- | --- | --- |
+| Aave v3 loan repay (5 USDC) | Ethereum Sepolia | `verify:testnet` · 2026-11-25 06:28:36 UTC (block `12207803`) | [`0x8b6b4210…04ea0c`](https://sepolia.etherscan.io/tx/0x8b6b4210ac28750395a242f578369421183315906f18e2ab3ddf68e1f904ea0c) |
+| Uniswap v3 swap (5 USDC -> 17.15 DAI) | Ethereum Sepolia | `verify:testnet` · 2026-11-25 06:28:48 UTC (block `12207804`) | [`0x784a80d4…6b0578`](https://sepolia.etherscan.io/tx/0x784a80d485cf97a27b84909f4290871b4a9e009b19612de3cbdde151ba6b0578) |
+| Telegram `/ask 2 USDC` payout to Kit | Ethereum Sepolia | `verify:testnet` · 2026-11-25 06:29:00 UTC (block `12207805`, TG msg 32) | [`0xa0dee545…4b68be`](https://sepolia.etherscan.io/tx/0xa0dee5452b95d4fcfabeefb13947d8a1d25b10d067baea07608f219dde4b68be) |
+| Telegram `/ask 20 USDC` payout to Kit | Ethereum Sepolia | `sim:demo` · 2026-11-25 06:31:24 UTC (block `12207816`, owner chat) | [`0xc453a91d…d8178d`](https://sepolia.etherscan.io/tx/0xc453a91d030307a604667169047689f8703f8cc98de4281c4a33fa5252d8178d) |
+| Hyperliquid ETH-PERP reduce-only IOC sell (`0.0181 ETH @ $1,653.7`, position `0.0363 -> 0.0182`) | Hyperliquid Testnet | `sim:demo` · 2026-11-25 06:31:07 UTC (order `65942782652`, tx `0x3be5…a863`, block `787719700`, non-withdrawable `source: "b"` agent) | [`0x1449…5182` (HL Testnet Account Page)](https://app.hyperliquid-testnet.xyz/explorer/address/0x14490658fc8C7e3f5cDc68f01317Bdf684715182) |
+
+*Pending owner keys/faucet:* public Bybit testnet, Binance spot testnet, and Coinbase reads run live (`npm run verify:exchanges`), while signed exchange writes skip until testnet API keys are configured; the TON test wallet [`0QDNtIy-zwHMK5hdc0qVZoi2TkfZr_O3MjXcrq0H8QVdAYHl`](https://testnet.tonviewer.com/0QDNtIy-zwHMK5hdc0qVZoi2TkfZr_O3MjXcrq0H8QVdAYHl) reads live on toncenter testnet and awaits faucet coins from `@testgiver_ton_bot` for a live TON payout hash.
+
 ---
 
 ## What ChainVision Does
@@ -262,6 +278,48 @@ Starts the backend on `127.0.0.1:8787` and the simulator, then walks the queue: 
 For the demo video, `npm run sim:demo` (same env, plus `VERIFY_REQUESTER_ADDRESS` and `VERIFY_TON_RECIPIENT`) walks the whole story in order: blank lens; an exchange line when live data raises one (it needs Bybit or Binance testnet keys, since every exchange line comes from a signed account read); a Hyperliquid trim by voice and tap; a Telegram request in USDC shown and paid; a request in TON shown, and paid only when the TON test wallet is funded; the brief; a voice alert set and fired; a voice order card with two venues' prices; blank again. It writes `sim-demo-report.json` with every step.
 
 Alert rules are kept in `.chainvision/state.json` (gitignored, mode 600); set `CHAINVISION_STATE_FILE` to keep them elsewhere. The glasses app's backend origin is one value: the first `network` whitelist entry in `packages/glasses/app.json` (`http://127.0.0.1:8787`). The glasses build reads it from there, so pointing the app at a hosted backend later means changing that one line and rebuilding.
+
+### 6. Packaged Build (`chainvision.ehpk`)
+
+Build and validate the Even Hub package from `packages/glasses`:
+
+```bash
+npm run pack:ehpk
+```
+
+This builds `@chainvision/shared` and `@chainvision/glasses`, runs `@evenrealities/evenhub-cli pack` against `packages/glasses/app.json` and `packages/glasses/dist` (`--sdk-ver 0.0.16`), outputs `chainvision.ehpk` in the repository root, and verifies that `package_id` (`com.chainvision.g2`), `version` (`0.1.0`), `min_app_version` (`2.2.10`), warnings (`[]`), and byte size all match `packages/glasses/app.json`.
+
+**Installing `chainvision.ehpk`:**
+- **Even Hub / G2 glasses:** build `chainvision.ehpk` locally with `npm run pack:ehpk` (or download it once published on a GitHub Release) and upload/sideload it through the Even Hub developer portal or CLI (`npx -y @evenrealities/evenhub-cli@0.2.0 create chainvision.ehpk` for a first draft, or `upload chainvision.ehpk` for subsequent builds). If you are pointing G2 at a hosted backend instead of `http://127.0.0.1:8787`, update the single `network` whitelist entry in `packages/glasses/app.json` before packing.
+- **Even Hub Simulator (no glasses required):** run `npm run dev:server`, `npm run dev:glasses`, and `npm run sim`.
+
+**Publishing a release binary (binary is gitignored, not committed to git):**
+```bash
+npm run pack:ehpk
+gh release create v1.0.0 chainvision.ehpk \
+  --title "ChainVision v1.0.0 (Heads Up Hackathon)" \
+  --notes "Packaged Even G2 .ehpk build (com.chainvision.g2 v0.1.0, min_app_version 2.2.10, SDK 0.0.16)."
+```
+
+### 7. Zero-Key Judge Walkthrough (`/judge`)
+
+`packages/judge` is a standalone static site (also served by the backend at `http://127.0.0.1:8787/judge/`, with `/judge` redirecting to `/judge/`) that **runs from the repository with one command** and needs **no API keys**. It renders the exact `576 × 288` Even G2 monochrome lens through `@chainvision/shared`'s `renderLensPage()`, enforces both `validateLensLayout()` and the 60-character line limit, pulls live public read-only prices (Hyperliquid Testnet, Bybit Testnet, Binance Spot Testnet, Coinbase Public; falling back to last recorded prices with their timestamp when feeds are unavailable), and walks a judge through five clearly labeled steps in under a minute:
+
+1. Blank lens (`0` lit pixels — example)
+2. Exchange margin line with a one-tap Funding -> Trading move (example action; signed Bybit/Binance writes run on testnet once keys are supplied)
+3. Hyperliquid liquidation line (`HL ETH LONG LIQ ~4m (6.0%)` scripted example line alongside the public HL mark; tapping replays the recorded real fill for order `65942782652`: `0.0181 ETH @ $1,653.7`, `0.0363 -> 0.0182`, tx `0x3be55891…9a863`)
+4. Telegram `/ask 20 USDC` request with tap to pay (recorded real Sepolia tx `0xc453a91d…d8178d`, dev-injected into the owner's single Telegram chat during `sim:demo`)
+5. Voice brief (`"What matters?"` + live public two-venue Binance/Coinbase confirm card)
+
+Run locally from the repository:
+```bash
+npm run dev:judge        # opens on http://127.0.0.1:5175/judge/
+```
+
+Deploy as a static site (one command; outputs both `/` and `/judge/` in `packages/judge/dist`):
+```bash
+npm run build:judge && npx wrangler pages deploy packages/judge/dist --project-name chainvision-judge
+```
 
 ---
 

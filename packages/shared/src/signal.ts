@@ -24,6 +24,130 @@ export const SIGNAL_RESHOW_MS = 60_000;
 /** A swipe hides a signal for this long unless it escalates. */
 export const SIGNAL_DISMISS_MS = 15 * 60_000;
 
+/** Rolling lookback window for mark-price velocity toward liquidation. */
+export const LIQ_ETA_WINDOW_MS = 3 * 60_000;
+/** Minimum elapsed time between oldest and newest sample before estimating an ETA. */
+export const LIQ_ETA_MIN_SPAN_MS = 10_000;
+/** Omit noisy multi-hour ETAs when price is barely drifting toward liquidation. */
+export const LIQ_ETA_MAX_MINUTES = 240;
+
+export interface PriceSample {
+  price: number;
+  at: number;
+}
+
+export interface LiquidationEtaInput {
+  side: 'LONG' | 'SHORT';
+  markPx: number;
+  liqPx: number | null;
+  samples: readonly PriceSample[];
+  now: number;
+  windowMs?: number;
+  minSpanMs?: number;
+  maxMinutes?: number;
+}
+
+/**
+ * Estimates minutes until mark price hits liquidation at its recent velocity over the lookback window.
+ * Returns null when price is flat, moving away from liquidation, has too little history, or exceeds maxMinutes.
+ */
+export function estimateLiquidationEtaMinutes(input: LiquidationEtaInput): number | null {
+  const {
+    side,
+    markPx,
+    liqPx,
+    samples,
+    now,
+    windowMs = LIQ_ETA_WINDOW_MS,
+    minSpanMs = LIQ_ETA_MIN_SPAN_MS,
+    maxMinutes = LIQ_ETA_MAX_MINUTES,
+  } = input;
+  if (!Number.isFinite(markPx) || markPx <= 0 || liqPx === null || !Number.isFinite(liqPx) || liqPx <= 0) {
+    return null;
+  }
+  const distance = side === 'LONG' ? markPx - liqPx : liqPx - markPx;
+  if (distance <= 0) return null;
+
+  const cutoff = now - windowMs;
+  const recent = samples
+    .filter((s) => Number.isFinite(s.price) && s.price > 0 && Number.isFinite(s.at) && s.at >= cutoff && s.at <= now)
+    .sort((a, b) => a.at - b.at);
+  if (recent.length < 2) return null;
+
+  const oldest = recent[0]!;
+  const newest = recent[recent.length - 1]!;
+  const spanMs = newest.at - oldest.at;
+  if (spanMs < minSpanMs) return null;
+
+  const deltaTowardLiq = side === 'LONG' ? oldest.price - newest.price : newest.price - oldest.price;
+  if (deltaTowardLiq <= 0) return null;
+
+  const ratePerMin = deltaTowardLiq / (spanMs / 60_000);
+  if (!Number.isFinite(ratePerMin) || ratePerMin <= 0) return null;
+
+  const etaMinutes = distance / ratePerMin;
+  if (!Number.isFinite(etaMinutes) || etaMinutes <= 0 || etaMinutes > maxMinutes) return null;
+  return etaMinutes;
+}
+
+export function formatLiqEta(etaMinutes: number | null): string | null {
+  if (etaMinutes === null || !Number.isFinite(etaMinutes) || etaMinutes <= 0) return null;
+  if (etaMinutes < 1) return '<1m';
+  const rounded = Math.round(etaMinutes);
+  if (rounded < 100) return `~${rounded}m`;
+  return `~${Math.round(etaMinutes / 60)}h`;
+}
+
+/**
+ * Formats a Hyperliquid or exchange liquidation risk fact within SIGNAL_LINE_MAX.
+ * Includes "LIQ ~4m" when mark price is moving toward liquidation; otherwise keeps "LIQ X.X% AWAY".
+ */
+export function formatLiqRiskLine(params: {
+  venue: string;
+  coin: string;
+  side: 'LONG' | 'SHORT';
+  liqDistancePct: number;
+  etaMinutes?: number | null;
+}): string {
+  const pct = params.liqDistancePct.toFixed(1);
+  const eta = formatLiqEta(params.etaMinutes ?? null);
+  if (eta) {
+    return fitSignalLine(`${params.venue} ${params.coin} ${params.side} LIQ ${eta} (${pct}%)`, SIGNAL_LINE_MAX);
+  }
+  return fitSignalLine(`${params.venue} ${params.coin} ${params.side} LIQ ${pct}% AWAY`, SIGNAL_LINE_MAX);
+}
+
+/** Rolling per-symbol mark-price history used to compute liquidation velocity across watcher polls. */
+export class MarkPriceHistory {
+  private readonly byKey = new Map<string, PriceSample[]>();
+  private readonly windowMs: number;
+
+  constructor(windowMs = LIQ_ETA_WINDOW_MS) {
+    this.windowMs = windowMs;
+  }
+
+  record(key: string, price: number, at: number): void {
+    if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(at)) return;
+    const cutoff = at - this.windowMs;
+    const prev = (this.byKey.get(key) ?? []).filter((s) => s.at >= cutoff && s.at <= at);
+    const last = prev[prev.length - 1];
+    if (last && last.at === at) {
+      last.price = price;
+    } else {
+      prev.push({ price, at });
+    }
+    this.byKey.set(key, prev);
+  }
+
+  samples(key: string, now: number): PriceSample[] {
+    const cutoff = now - this.windowMs;
+    const list = (this.byKey.get(key) ?? []).filter((s) => s.at >= cutoff && s.at <= now);
+    if (list.length === 0) this.byKey.delete(key);
+    else this.byKey.set(key, list);
+    return list;
+  }
+}
+
 export interface Signal {
   /** Stable identity of the condition, e.g. "aave:health" or "hyperliquid:liq:ETH". */
   id: string;

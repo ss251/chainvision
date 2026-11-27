@@ -3,9 +3,13 @@ import {
   BRIEF_EMPTY_TEXT,
   SIGNAL_DISMISS_MS,
   SIGNAL_LENS_LINE_MAX,
+  MarkPriceHistory,
   SignalQueue,
   checkNewRule,
   compareSignals,
+  estimateLiquidationEtaMinutes,
+  formatLiqEta,
+  formatLiqRiskLine,
   priceAlertSignal,
   rankSignals,
   renderLensPage,
@@ -224,5 +228,137 @@ describe('price alert rules', () => {
     expect(s.action).toBeNull();
     expect(s.severity).toBe('notice');
     expect(signalLensLine(s).length).toBeLessThanOrEqual(SIGNAL_LENS_LINE_MAX);
+  });
+});
+
+describe('time-to-liquidation ETA estimate', () => {
+  it('estimates minutes until liquidation when a LONG mark price is dropping toward liqPx', () => {
+    // 1800 -> 1740 over 2 minutes = -30/min; remaining distance to 1620 is 120 -> 4.0 minutes
+    const eta = estimateLiquidationEtaMinutes({
+      side: 'LONG',
+      markPx: 1740,
+      liqPx: 1620,
+      samples: [
+        { price: 1800, at: NOW - 120_000 },
+        { price: 1770, at: NOW - 60_000 },
+        { price: 1740, at: NOW },
+      ],
+      now: NOW,
+    });
+    expect(eta).toBeCloseTo(4, 6);
+    expect(formatLiqEta(eta)).toBe('~4m');
+    expect(formatLiqRiskLine({ venue: 'HL', coin: 'ETH', side: 'LONG', liqDistancePct: 6.9, etaMinutes: eta })).toBe(
+      'HL ETH LONG LIQ ~4m (6.9%)',
+    );
+  });
+
+  it('estimates minutes until liquidation when a SHORT mark price is rising toward liqPx', () => {
+    // 58000 -> 58500 over 1 minute = +500/min; remaining distance to 60500 is 2000 -> 4.0 minutes
+    const eta = estimateLiquidationEtaMinutes({
+      side: 'SHORT',
+      markPx: 58500,
+      liqPx: 60500,
+      samples: [
+        { price: 58000, at: NOW - 60_000 },
+        { price: 58500, at: NOW },
+      ],
+      now: NOW,
+    });
+    expect(eta).toBeCloseTo(4, 6);
+    const line = formatLiqRiskLine({ venue: 'BYBIT', coin: 'BTC', side: 'SHORT', liqDistancePct: 3.4, etaMinutes: eta });
+    expect(line).toBe('BYBIT BTC SHORT LIQ ~4m (3.4%)');
+    const lensLine = signalLensLine({ line, action: action('CLOSE 50% BTC') });
+    expect(lensLine).toBe('BYBIT BTC SHORT LIQ ~4m (3.4%) - TAP: CLOSE 50% BTC');
+    expect(lensLine.length).toBeLessThanOrEqual(SIGNAL_LENS_LINE_MAX);
+  });
+
+  it('returns null when price is flat, moving away from liquidation, too short a span, or outside window', () => {
+    // Moving away from liquidation (LONG rising)
+    expect(
+      estimateLiquidationEtaMinutes({
+        side: 'LONG',
+        markPx: 1800,
+        liqPx: 1620,
+        samples: [
+          { price: 1750, at: NOW - 60_000 },
+          { price: 1800, at: NOW },
+        ],
+        now: NOW,
+      }),
+    ).toBeNull();
+
+    // Flat price
+    expect(
+      estimateLiquidationEtaMinutes({
+        side: 'LONG',
+        markPx: 1740,
+        liqPx: 1620,
+        samples: [
+          { price: 1740, at: NOW - 60_000 },
+          { price: 1740, at: NOW },
+        ],
+        now: NOW,
+      }),
+    ).toBeNull();
+
+    // Span shorter than minimum 10s
+    expect(
+      estimateLiquidationEtaMinutes({
+        side: 'LONG',
+        markPx: 1740,
+        liqPx: 1620,
+        samples: [
+          { price: 1750, at: NOW - 5_000 },
+          { price: 1740, at: NOW },
+        ],
+        now: NOW,
+      }),
+    ).toBeNull();
+
+    // Sample older than 3-minute window ignored (leaves only 1 recent sample)
+    expect(
+      estimateLiquidationEtaMinutes({
+        side: 'LONG',
+        markPx: 1740,
+        liqPx: 1620,
+        samples: [
+          { price: 1900, at: NOW - 240_000 },
+          { price: 1740, at: NOW },
+        ],
+        now: NOW,
+      }),
+    ).toBeNull();
+
+    // Very slow drift (>240m) suppressed
+    expect(
+      estimateLiquidationEtaMinutes({
+        side: 'LONG',
+        markPx: 1740,
+        liqPx: 1620,
+        samples: [
+          { price: 1740.1, at: NOW - 60_000 },
+          { price: 1740, at: NOW },
+        ],
+        now: NOW,
+      }),
+    ).toBeNull();
+  });
+
+  it('formats sub-minute ETAs as <1m and keeps MarkPriceHistory pruned to the lookback window', () => {
+    expect(formatLiqEta(0.4)).toBe('<1m');
+    expect(formatLiqEta(120)).toBe('~2h');
+    expect(formatLiqEta(null)).toBeNull();
+    expect(formatLiqRiskLine({ venue: 'HL', coin: 'ETH', side: 'LONG', liqDistancePct: 6.0, etaMinutes: null })).toBe(
+      'HL ETH LONG LIQ 6.0% AWAY',
+    );
+
+    const history = new MarkPriceHistory(180_000);
+    history.record('hl:ETH', 1900, NOW - 200_000);
+    history.record('hl:ETH', 1800, NOW - 60_000);
+    history.record('hl:ETH', 1770, NOW);
+    expect(history.samples('hl:ETH', NOW)).toEqual([
+      { price: 1800, at: NOW - 60_000 },
+      { price: 1770, at: NOW },
+    ]);
   });
 });

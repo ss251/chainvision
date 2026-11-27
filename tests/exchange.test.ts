@@ -320,6 +320,55 @@ describe('exchange signals in the one queue', () => {
     expect(engine.showBrief(NOW)).toEqual(['HL ETH LONG LIQ 4.7% AWAY', 'BYBIT MARGIN LOW', 'BYBIT BTC LONG LIQ 6.0% AWAY']);
   });
 
+  it('adds a LIQ ~4m estimate on Hyperliquid and Bybit risk lines when price trends toward liquidation', () => {
+    const engine = new ChainVisionEngine(config());
+    const t0 = NOW;
+    const t1 = NOW + 60_000;
+
+    // Poll 1: establish initial mark prices (HL ETH 1780, Bybit BTC 58500)
+    const snap1 = protocols(
+      desk({
+        bybit: {
+          marks: { BTC: 58500 },
+          signed: 'ok',
+          account: null,
+          positions: [{ ...BTC_LONG, markPx: 58500, liqPx: 56000, liqDistancePct: 4.3 }],
+        },
+      }),
+    );
+    snap1.hyperliquid.positions = [
+      { coin: 'ETH', side: 'LONG', size: 0.5, entryPx: 1900, markPx: 1780, liquidationPx: 1680, liqDistancePct: 5.6, unrealizedPnlUsd: -60, leverage: 5, notionalUsd: 890 },
+    ];
+    engine.applySnapshots(snap1, t0);
+
+    // Poll 2 (+1 min): ETH drops 20 (remaining 80 -> 4m), BTC drops 500 (remaining 2000 -> 4m)
+    const snap2 = protocols(
+      desk({
+        bybit: {
+          marks: { BTC: 58000 },
+          signed: 'ok',
+          account: null,
+          positions: [{ ...BTC_LONG, markPx: 58000, liqPx: 56000, liqDistancePct: 3.4 }],
+        },
+      }),
+    );
+    snap2.hyperliquid.positions = [
+      { coin: 'ETH', side: 'LONG', size: 0.5, entryPx: 1900, markPx: 1760, liquidationPx: 1680, liqDistancePct: 4.5, unrealizedPnlUsd: -70, leverage: 5, notionalUsd: 880 },
+    ];
+    const ranked = engine.applySnapshots(snap2, t1);
+    const bybitSig = ranked.find((x) => x.id === 'bybit:liq:BTCUSDT')!;
+    const hlSig = ranked.find((x) => x.id === 'hyperliquid:liq:ETH')!;
+
+    expect(bybitSig.line).toBe('BYBIT BTC LONG LIQ ~4m (3.4%)');
+    expect(hlSig.line).toBe('HL ETH LONG LIQ ~4m (4.5%)');
+    for (const sig of [bybitSig, hlSig]) {
+      const fullLine = signalLensLine(sig);
+      expect(fullLine.length).toBeLessThanOrEqual(SIGNAL_LENS_LINE_MAX);
+      const layout = renderLensPage({ mode: 'signal', paired: true, signal: sig });
+      expect(validateLensLayout(layout)).toEqual({ valid: true, errors: [] });
+    }
+  });
+
   it('puts Binance testnet order notices below anything with money at risk', () => {
     const engine = new ChainVisionEngine(config());
     const snap = marginLow();

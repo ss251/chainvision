@@ -9,6 +9,7 @@ import {
   BYBIT_MMR_CRITICAL,
   BYBIT_MMR_WARN,
   EXCHANGE_CAPS,
+  formatLiqRiskLine,
   twoVenueLine,
   type BinanceBalanceView,
   type BinanceDeskSnapshot,
@@ -159,6 +160,7 @@ export function exchangeSignalSpecs(
   snap: ExchangeDeskSnapshot,
   th: UserThresholds,
   allowance: (type: ExchangeActionType) => number,
+  liqEtaMinutes?: (p: BybitPositionView) => number | null,
 ): SignalSpec[] {
   const specs: SignalSpec[] = [];
   const { bybit, binance } = snap;
@@ -193,13 +195,20 @@ export function exchangeSignalSpecs(
 
   for (const p of positions) {
     if (p.liqDistancePct === null || p.liqDistancePct >= th.exchangeMinLiqDistancePct) continue;
+    const etaMinutes = liqEtaMinutes ? liqEtaMinutes(p) : null;
     specs.push({
       base: {
         id: 'bybit:liq:' + p.symbol,
         source: 'exchange',
         kind: 'liquidation_distance',
         severity: p.liqDistancePct < th.exchangeMinLiqDistancePct / 2 ? 'critical' : 'warning',
-        line: 'BYBIT ' + p.coin + ' ' + p.side + ' LIQ ' + p.liqDistancePct.toFixed(1) + '% AWAY',
+        line: formatLiqRiskLine({
+          venue: 'BYBIT',
+          coin: p.coin,
+          side: p.side,
+          liqDistancePct: p.liqDistancePct,
+          etaMinutes,
+        }),
         lossDistancePct: p.liqDistancePct,
         usdAtRisk: p.notionalUsd / Math.max(1, p.leverage),
       },
@@ -300,8 +309,13 @@ export class ExchangeDesk {
     }
   }
 
-  signalSpecs(snap: ExchangeDeskSnapshot, th: UserThresholds, now = Date.now()): SignalSpec[] {
-    return exchangeSignalSpecs(snap, th, (t) => this.ledger.allowance(t, now));
+  signalSpecs(
+    snap: ExchangeDeskSnapshot,
+    th: UserThresholds,
+    now = Date.now(),
+    liqEtaMinutes?: (p: BybitPositionView) => number | null,
+  ): SignalSpec[] {
+    return exchangeSignalSpecs(snap, th, (t) => this.ledger.allowance(t, now), liqEtaMinutes);
   }
 
   /** Why the last voice command could not become an exchange card, once. */
